@@ -1,12 +1,17 @@
-/target/
+# Cargo build artifacts (unanchored — also catches per-crate `target/`
+# created when someone runs `cargo` inside a workspace member; that's
+# how 125 MB of forge-charts/target ended up tracked before).
+target/
 **/*.rs.bk
 Cargo.lock.bak
+
+# Per-crate Cargo.lock files. The workspace root lock is the source of
+# truth; nested locks appear when `cargo` is run inside a member dir
+# and would otherwise drift silently.
+crates/*/Cargo.lock
 
 # IDE / editor scratch
 /.vscode/
 /.idea/
 *.swp
 *~
-
-# Cargo publish artifacts
-/target/
