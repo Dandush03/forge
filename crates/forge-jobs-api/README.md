@@ -38,6 +38,26 @@ The crate exposes:
   `axum::response::IntoResponse` so each variant maps to a sensible
   HTTP status code (400 / 404 / 409 / 429 / 500).
 
+### ⚠️ Security — the routes are unauthenticated
+
+`router()` returns an Axum `Router` with **no auth, no rate
+limiting, no body-size limit, no CORS**. Some routes mutate state
+(`POST /queue/:name/backoff`). You MUST either:
+
+1. **Bind to loopback** (`127.0.0.1`) so only same-host
+   processes can hit it, or
+2. **Mount behind your own middleware** that enforces auth before
+   the request reaches `router()`:
+   ```rust,ignore
+   use axum::Router;
+   let app: Router = Router::new()
+       .nest("/api/queue", forge_jobs_api::router(storage))
+       .layer(my_auth_middleware);
+   ```
+
+A future minor release will add an optional `auth` feature with a
+pluggable token check; today, that's on you.
+
 ### Wiring it up
 
 ```rust,ignore
@@ -56,9 +76,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     runtime.ensure_queue("default", 4).await?;
     let _handle = runtime.start().await?;
 
-    // Mount the HTTP API.
+    // Mount the HTTP API. Bound to loopback because routes are
+    // unauthenticated — see the Security section above before
+    // changing to 0.0.0.0.
     let app = router(storage);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await?;
     axum::serve(listener, app).await?;
     Ok(())
 }

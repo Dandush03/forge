@@ -20,6 +20,18 @@ use crate::handlers;
 
 /// Build the queue API router. Pass the shared `Storage` bundle in;
 /// it's cloned into request handlers via Axum's `State` extractor.
+///
+/// # Security
+///
+/// **The returned router is unauthenticated.** Some routes mutate
+/// state (`POST /queue/{name}/backoff`). Mount behind your own auth
+/// middleware (`Router::nest(...).layer(auth_layer)`) **or** bind
+/// the resulting `axum::serve` to `127.0.0.1`. Do not bind to
+/// `0.0.0.0` in production without a layer of authentication first.
+///
+/// The router also has no `DefaultBodyLimit`, no `CorsLayer`, and
+/// no rate limiting — apply those as layers at your mount point if
+/// you need them.
 pub fn build(storage: Arc<Storage>) -> Router {
     Router::new()
         .route("/health", get(health))

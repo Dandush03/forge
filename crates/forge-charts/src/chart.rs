@@ -178,6 +178,13 @@ where
         let mut s = format!("--charts-height: {height}px;");
         overrides.with(|map| {
             for (color_class, hex) in map {
+                // Defense-in-depth: write-site validation in the
+                // legend picker rejects non-hex input, but
+                // re-validate here so a future bug bypassing the
+                // write path can't inject CSS via the read path.
+                if !is_hex_color(hex) {
+                    continue;
+                }
                 // Set both the solid stroke color and a soft variant
                 // (50% alpha) for the gradient fill. Hex stays the
                 // truthful source; CSS color-mix isn't broadly enough
@@ -253,6 +260,15 @@ fn Legend(
                 let cc_input = color_class.clone();
                 let on_input = move |ev: leptos::ev::Event| {
                     let target = event_target_value(&ev);
+                    // Defense-in-depth: native `<input type="color">`
+                    // always emits `#rrggbb`, but a malicious extension
+                    // or synthetic event can dispatch arbitrary text.
+                    // Reject anything that isn't a hex color so the
+                    // value can't break out of the CSS context when
+                    // it's later interpolated into `style="…"`.
+                    if !is_hex_color(&target) {
+                        return;
+                    }
                     overrides.update(|map| {
                         map.insert(cc_input.clone(), target);
                     });
@@ -291,6 +307,15 @@ fn Legend(
             }).collect_view() }
         </div>
     }
+}
+
+/// True for `#?[0-9a-fA-F]{3}` or `#?[0-9a-fA-F]{6}` — exactly the
+/// shape native `<input type="color">` emits. Used to gate writes
+/// to the overrides map so a synthetic input event with arbitrary
+/// text can't land CSS-injection payload in inline `style="…"`.
+fn is_hex_color(s: &str) -> bool {
+    let h = s.trim().trim_start_matches('#');
+    matches!(h.len(), 3 | 6) && h.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Produce a "soft" rgba string from a `#rrggbb` hex by holding the
@@ -1183,6 +1208,35 @@ mod tests {
     #[test]
     fn soften_hex_passes_through_garbage() {
         assert_eq!(soften_hex("not a color"), "not a color");
+    }
+
+    #[test]
+    fn is_hex_color_accepts_short_and_long_forms() {
+        assert!(is_hex_color("#fff"));
+        assert!(is_hex_color("#FFF"));
+        assert!(is_hex_color("#4262ff"));
+        assert!(is_hex_color("#4262FF"));
+        // Allow the `#`-less form because some pickers emit that
+        // shape; soften_hex already strips the leading `#`.
+        assert!(is_hex_color("fff"));
+        assert!(is_hex_color("4262ff"));
+    }
+
+    #[test]
+    fn is_hex_color_rejects_css_injection_payloads() {
+        // The realistic synthetic-event injection: arbitrary CSS
+        // that would otherwise land inside inline `style="…"` and
+        // execute as additional declarations.
+        assert!(!is_hex_color("red; background-image: url(http://evil)"));
+        assert!(!is_hex_color("#fff; color: red"));
+        assert!(!is_hex_color(""));
+        assert!(!is_hex_color("#"));
+        assert!(!is_hex_color("#ggg"));
+        // Reject the 4 / 5 / 7 / 8-char in-between sizes that don't
+        // match either of HTML5's accepted hex shapes.
+        assert!(!is_hex_color("#4262f"));
+        assert!(!is_hex_color("#4262fff"));
+        assert!(!is_hex_color("rgb(255, 0, 0)"));
     }
 
     #[test]

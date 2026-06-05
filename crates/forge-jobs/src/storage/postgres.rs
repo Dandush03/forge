@@ -982,7 +982,14 @@ impl JobQueue for PostgresStorage {
         // Use NOTIFY without a payload — workers only need the wake
         // signal, not the job id (claim_next picks the highest
         // priority row anyway).
-        let sql = format!("NOTIFY \"{channel}\"");
+        //
+        // `escape_pg_ident` escapes any `"` in the channel so a
+        // hostile queue name can't break out of the quoted
+        // identifier. `LISTEN` (in `wait_for_work` above) goes
+        // through sqlx's `PgListener::listen` which does the same
+        // escape internally; this path builds raw SQL so we have to
+        // do it ourselves.
+        let sql = format!("NOTIFY \"{}\"", escape_pg_ident(&channel));
         sqlx::query(&sql)
             .execute(&self.pool)
             .await
@@ -2136,6 +2143,62 @@ fn row_to_cron(r: &sqlx::postgres::PgRow) -> Result<CronScheduleRecord> {
 /// non-queue channels we want stay distinct.
 fn listen_channel(queue: &str) -> String {
     format!("q_{queue}")
+}
+
+/// Escape an identifier for safe interpolation into a quoted
+/// Postgres identifier (`"…"`). Mirrors sqlx's internal `ident()`:
+/// truncate at the first NUL byte (PG identifiers can't contain
+/// NUL), then double any `"`. The caller wraps the result in
+/// `"..."`. Used by `notify()` to build the `NOTIFY "…"` statement
+/// safely even when the queue name contains hostile characters.
+fn escape_pg_ident(name: &str) -> String {
+    let truncated = name.find('\0').map_or(name, |i| &name[..i]);
+    truncated.replace('"', "\"\"")
+}
+
+#[cfg(test)]
+mod escape_tests {
+    use super::escape_pg_ident;
+
+    #[test]
+    fn plain_identifier_passes_through() {
+        assert_eq!(escape_pg_ident("q_default"), "q_default");
+    }
+
+    #[test]
+    fn double_quotes_are_doubled() {
+        assert_eq!(escape_pg_ident(r#"a"b"c"#), r#"a""b""c"#);
+    }
+
+    #[test]
+    fn injection_attempt_stays_inside_the_quoted_identifier() {
+        // A hostile queue name that tries to close the identifier
+        // and append SQL. After escaping, every `"` is doubled —
+        // PG's escape sequence for a literal `"` inside a quoted
+        // identifier. The wrapped form `"x""; DROP …"` is ONE
+        // identifier as far as the server is concerned (which it
+        // then rejects as unknown / too long), not statement-
+        // boundary SQL.
+        let hostile = r#"x"; DROP TABLE sync_queue; --"#;
+        let escaped = escape_pg_ident(hostile);
+        // Every original `"` (one of them) doubled → escaped has 2
+        // quote chars total. Even-count is the structural
+        // invariant: a closing `"` always has its escape partner.
+        let quote_count = escaped.chars().filter(|&c| c == '"').count();
+        assert!(
+            quote_count.is_multiple_of(2),
+            "escaping must produce paired quotes; got {quote_count} in {escaped:?}"
+        );
+        // Sanity: the original `"` survived as `""` (PG's literal-quote escape).
+        assert!(escaped.contains(r#""""#));
+    }
+
+    #[test]
+    fn nul_byte_truncates_identifier() {
+        // PG identifiers cannot contain NUL; sqlx truncates so we
+        // mirror that for predictability.
+        assert_eq!(escape_pg_ident("a\0b"), "a");
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
