@@ -76,30 +76,50 @@
 //! `cancel_requested_at` flag within `HEARTBEAT_INTERVAL` (10s). User-
 //! cancelled jobs route straight to `Dead` without burning the retry budget.
 //!
-//! ## Legacy `Scheduler`
+//! ## Optional features
 //!
-//! The crate also re-exports a smaller cooperative recurring-job
-//! [`Scheduler`] used by a couple of pre-queue subsystems (LLM idempotency
-//! cache pruning, etc.). New work should use [`QueueRuntime`]; the
-//! `Scheduler` types stay re-exported as `SchedulerJobCtx` / etc. for the
-//! existing callers.
+//! - **`postgres`** — enables the Postgres storage adapter. Off by
+//!   default; service / k8s deploys flip this on.
+//! - **`legacy-scheduler`** — re-exports a smaller cooperative
+//!   recurring-job `Scheduler` (with `Job`, `JobStore`, `Clock`,
+//!   `parse_cron`, etc.) that predates the queue subsystem. Used by
+//!   the originating project's LLM idempotency cache pruning and a
+//!   few similar internal cron tasks. New code should use
+//!   [`QueueRuntime`] with a cron schedule instead.
 
-pub mod clock;
-pub mod error;
-pub mod job;
+pub mod cron_expr;
 pub mod runtime;
-pub mod scheduler;
 pub mod storage;
-pub mod store;
 
+pub use cron_expr::parse_cron;
+
+// Legacy cron `Scheduler` modules. Only compiled when the
+// `legacy-scheduler` feature is on. The shared `parse_cron` helper
+// the queue's `runtime::cron` needs lives in `cron_expr` (always
+// compiled).
+#[cfg(feature = "legacy-scheduler")]
+mod clock;
+#[cfg(feature = "legacy-scheduler")]
+mod error;
+#[cfg(feature = "legacy-scheduler")]
+mod job;
+#[cfg(feature = "legacy-scheduler")]
+mod scheduler;
+#[cfg(feature = "legacy-scheduler")]
+mod store;
+
+#[cfg(feature = "legacy-scheduler")]
 pub use clock::{Clock, SystemClock};
+#[cfg(feature = "legacy-scheduler")]
 pub use error::{JobError, Result};
-// Legacy cron `Scheduler` types — the queue-side equivalent is in
-// `runtime`. The legacy `JobCtx` is re-exported as `SchedulerJobCtx`
-// so the queue's `JobCtx` (the one handler authors actually use)
-// can keep the short name.
+// The legacy `JobCtx` is re-exported as `SchedulerJobCtx` so the
+// queue's `JobCtx` (the one handler authors actually use) can keep
+// the short name.
+#[cfg(feature = "legacy-scheduler")]
 pub use job::{Job, JobCtx as SchedulerJobCtx, Schedule};
-pub use scheduler::{Scheduler, parse_cron};
+#[cfg(feature = "legacy-scheduler")]
+pub use scheduler::Scheduler;
+#[cfg(feature = "legacy-scheduler")]
 pub use store::{JobStateRecord, JobStore};
 
 // Queue subsystem — runtime + storage trait surface.

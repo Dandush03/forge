@@ -51,6 +51,13 @@ default = []
 # SQLite; service / k8s deploys flip `--features postgres` on
 # the binary that drives a cluster-shared queue.
 postgres = ["sqlx/postgres", "sqlx/uuid", "uuid"]
+# Re-export the legacy cooperative-scheduler API (`Scheduler`,
+# `Job`, `JobStore`, `Clock`, `parse_cron`, etc.). Predates the
+# queue subsystem; kept for in-workspace consumers that still
+# wire it for their cron-style recurring tasks. New code should
+# use `QueueRuntime` + cron schedules instead. Off by default so
+# crates.io consumers get the focused queue API.
+legacy-scheduler = []
 
 [dev-dependencies]
 tokio    = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
