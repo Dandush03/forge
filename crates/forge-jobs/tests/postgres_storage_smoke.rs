@@ -20,13 +20,17 @@
     clippy::panic,
     reason = "integration tests crash loudly on setup/assert failures; that's the point"
 )]
+#![allow(
+    clippy::manual_let_else,
+    reason = "match-on-EnqueueOutcome with a wildcard arm is the SemVer-safe shape for a `#[non_exhaustive]` enum; `let...else` would lose the named happy-path variant"
+)]
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use forge_jobs::PostgresStorage;
 use forge_jobs::TimelineEventType;
-use forge_jobs::storage::postgres::PostgresStorage;
 use forge_jobs::storage::{
     CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue, JobStatus,
     NewCronSchedule, ProcessRegistry, QueueConfig,
@@ -88,7 +92,7 @@ async fn enqueue_then_claim_returns_the_row() {
     let outcome = b.storage.enqueue(req).await.unwrap();
     let id = match outcome {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => panic!("first enqueue can't dedupe"),
+        _ => unreachable!(),
     };
 
     let claimed = b
@@ -145,7 +149,7 @@ async fn finalize_done_marks_completed() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
@@ -167,7 +171,7 @@ async fn finalize_failed_appends_error_history() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
@@ -200,7 +204,7 @@ async fn retry_cycle_emits_balanced_events() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
@@ -253,7 +257,7 @@ async fn delete_cascades_to_queue_event_rows() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
@@ -303,7 +307,7 @@ async fn run_now_advances_pending_scheduled_at() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     assert!(b.storage.claim_next("gh", "w-0").await.unwrap().is_none());
     assert!(b.storage.run_now(&id).await.unwrap());
@@ -478,7 +482,7 @@ async fn claim_next_is_fifo_within_priority_and_scheduled_at() {
             .unwrap()
         {
             EnqueueOutcome::Enqueued(id) => id,
-            EnqueueOutcome::Deduped(_) => unreachable!(),
+            _ => unreachable!(),
         };
         enq_ids.push(id);
     }

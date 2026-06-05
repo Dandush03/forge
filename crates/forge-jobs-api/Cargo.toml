@@ -1,7 +1,9 @@
 [package]
 name = "forge-jobs-api"
 version = "0.1.0"
+authors = ["Daniel Laloush <dandush03@users.noreply.github.com>"]
 edition = "2024"
+rust-version = "1.92"
 description = "Axum HTTP transport for forge-jobs. Pure async handlers over the storage trait surface (shared with in-process IPC bindings) + JSON DTOs + a reference jobs-server binary."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dandush03/forge"
