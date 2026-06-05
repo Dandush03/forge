@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use forge_jobs::storage::sqlite::SqliteStorage;
+use forge_jobs::SqliteStorage;
 use forge_jobs::storage::{
     CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue, JobStatus,
     NewCronSchedule, ProcessRegistry, QueueConfig,

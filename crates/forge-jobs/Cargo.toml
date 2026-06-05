@@ -1,11 +1,15 @@
 [package]
 name = "forge-jobs"
 version = "0.1.0"
+authors = ["Daniel Laloush <dandush03@users.noreply.github.com>"]
 edition = "2024"
+rust-version = "1.92"
 description = "Sidekiq-style job queue with embedded SQLite and pluggable Postgres. Per-queue workers + cron + cluster-wide rate-limit budget + cancellation that survives across replicas."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dandush03/forge"
 readme = "README.md"
+keywords = ["queue", "jobs", "sidekiq", "sqlite", "postgres"]
+categories = ["asynchronous", "database"]
 publish = true
 
 [dependencies]

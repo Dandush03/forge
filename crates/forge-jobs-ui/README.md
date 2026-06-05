@@ -116,5 +116,13 @@ running in production against a real queue for months.
 
 ## License
 
-Dual-licensed under either [Apache-2.0](../../LICENSE-APACHE) or
-[MIT](../../LICENSE-MIT) at your option.
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <http://opensource.org/licenses/MIT>)
+
+at your option. Contributions intentionally submitted for inclusion
+in this crate shall be dual-licensed as above, without any additional
+terms or conditions.

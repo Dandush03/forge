@@ -184,5 +184,13 @@ back to `./jobs/config` / `./jobs/data` when unset).
 
 ## License
 
-Same as the parent repo. Inquire if you'd like a different license for
-external use.
+Dual-licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or
+  <http://opensource.org/licenses/MIT>)
+
+at your option. Contributions intentionally submitted for inclusion
+in this crate shall be dual-licensed as above, without any additional
+terms or conditions.

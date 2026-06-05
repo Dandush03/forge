@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use forge_jobs::storage::sqlite::SqliteStorage;
+use forge_jobs::SqliteStorage;
 use forge_jobs::{EnqueueRequest, Storage};
 use serde_json::json;
 
@@ -27,7 +27,7 @@ async fn metrics_render_reports_per_queue_depth() {
             .unwrap();
     }
 
-    let body = forge_jobs_api::metrics::render(&storage).await.unwrap();
+    let body = forge_jobs_api::metrics_render(&storage).await.unwrap();
     assert!(body.contains("# TYPE queue_pending_jobs gauge"));
     assert!(body.contains("queue_pending_jobs{queue=\"gh\"} 3"));
     assert!(body.contains("queue_max_workers{queue=\"gh\"} 5"));

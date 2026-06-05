@@ -21,9 +21,8 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use forge_jobs::Storage;
-use forge_jobs::storage::sqlite::SqliteStorage;
 use forge_jobs::storage::{PathsError, QueuePaths};
+use forge_jobs::{SqliteStorage, Storage};
 
 /// Env-backed [`QueuePaths`] for the server CLI. Same fallbacks as
 /// `jobs-db` — the queue crate stays paths-library agnostic.
@@ -45,7 +44,7 @@ impl QueuePaths for EnvQueuePaths {
         ))
     }
 }
-use forge_jobs_api::router;
+use forge_jobs_api::build_router;
 
 #[allow(
     clippy::expect_used,
@@ -121,7 +120,7 @@ async fn async_main() {
         Err(e) => fatal_exit(&format!("invalid JOBS_API_BIND `{bind}`"), &e),
     };
 
-    let app = router::build(Arc::new(storage));
+    let app = build_router(Arc::new(storage));
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => fatal_exit(&format!("bind {addr}"), &e),
@@ -144,7 +143,7 @@ async fn open_postgres() -> Storage {
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(30);
     tracing::info!(url = %redact_url(&url), max_connections = max, "opening postgres storage");
-    match forge_jobs::storage::postgres::PostgresStorage::open(&url, max).await {
+    match forge_jobs::PostgresStorage::open(&url, max).await {
         Ok(pg) => Storage::from_one(Arc::new(pg)),
         Err(e) => fatal_exit("postgres open", &e),
     }

@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use chrono::{Duration as ChronoDuration, Utc};
-use forge_jobs::storage::sqlite::SqliteStorage;
+use forge_jobs::SqliteStorage;
 use forge_jobs::storage::{EnqueueRequest, JobStatus};
 use forge_jobs::{Storage as JobStorage, reap_stale_jobs};
 use serde_json::json;

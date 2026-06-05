@@ -138,12 +138,14 @@ pub use runtime::{
     WorkerPoolHandler, cleanup_once, cron_tick_once, ensure_default_rate_limits, ensure_schedules,
     metrics_roll_once, reap_stale_jobs, rebalance_once,
 };
+#[cfg(feature = "postgres")]
+pub use storage::PostgresStorage;
 pub use storage::{
-    CronScheduleRecord, CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobId,
-    JobLatency, JobQueue, JobRecord, JobStatus, MetricBucket, NewCronSchedule, NewJob,
-    PROCESS_WIDE_QUEUE, ProcessRecord, ProcessRegistry, QueueConfig, QueueConfigRow, QueueCounts,
-    RateLimitOutcome, RateLimitStorage, Storage, StorageError, StorageInfo, TimelineEvent,
-    TimelineEventType, metric, sqlite::SqliteStorage,
+    CronScheduleRecord, CronStorage, DrainedSamples, EnqueueOutcome, EnqueueRequest,
+    FinalizeOutcome, JobId, JobLatency, JobQueue, JobRecord, JobStatus, MetricBucket,
+    NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord, ProcessRegistry, QueueConfig,
+    QueueConfigRow, QueueCounts, RateLimitOutcome, RateLimitStorage, SqliteStorage, Storage,
+    StorageError, StorageInfo, TimelineEvent, TimelineEventType, metric,
 };
 
 /// Format an error with its full `Error::source()` chain as

@@ -27,21 +27,36 @@
 //! BRPOP / Lua scripts) and Postgres (`SKIP LOCKED`) can implement the
 //! same contract with completely different primitives.
 
-pub mod database_config;
-pub mod db_timing;
-pub mod error;
-pub mod paths;
+// Storage submodules are internal — the SemVer surface is the curated
+// re-exports below. `#[allow(unreachable_pub)]` keeps inner `pub` items
+// as module-local API documentation instead of forcing every item to
+// be `pub(crate)`. Same pattern as `forge_charts` / `forge_jobs_ui`.
+#[allow(unreachable_pub)]
+pub(crate) mod database_config;
+#[allow(unreachable_pub)]
+pub(crate) mod db_timing;
+#[allow(unreachable_pub)]
+pub(crate) mod error;
+#[allow(unreachable_pub)]
+pub(crate) mod paths;
 #[cfg(feature = "postgres")]
-pub mod postgres;
+#[allow(unreachable_pub)]
+pub(crate) mod postgres;
 mod retry;
-pub mod sqlite;
-pub mod types;
+#[allow(unreachable_pub)]
+pub(crate) mod sqlite;
+#[allow(unreachable_pub)]
+pub(crate) mod types;
 
 pub use paths::{PathsError, QueuePaths};
 pub(crate) use retry::with_transient_retry;
 
 pub use database_config::{DatabaseConfig, PostgresConfig, SqliteConfig};
+pub use db_timing::DrainedSamples;
 pub use error::{Result, StorageError};
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresStorage;
+pub use sqlite::SqliteStorage;
 pub use types::{
     CronScheduleRecord, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobId, JobLatency,
     JobRecord, JobStatus, MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord,
