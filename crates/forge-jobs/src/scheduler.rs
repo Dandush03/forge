@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::clock::{Clock, SystemClock};
+use crate::cron_expr::parse_cron;
 use crate::error::{JobError, Result};
 use crate::job::{Job, JobCtx, Schedule};
 use crate::store::JobStore;
@@ -336,16 +337,9 @@ fn next_cron_local(sched: &cron::Schedule, now: DateTime<Utc>) -> Option<DateTim
         .map(|dt| dt.with_timezone(&Utc))
 }
 
-/// Parse a 6-field cron expression (`sec min hour dom mon dow`).
-///
-/// Returns the error as a `String` so callers can log it without
-/// dragging the cron crate into their signatures. Host code should
-/// validate at the edge with this same function so rejection reasons
-/// match what the scheduler would otherwise silently log.
-pub fn parse_cron(expr: &str) -> std::result::Result<cron::Schedule, String> {
-    use std::str::FromStr;
-    cron::Schedule::from_str(expr).map_err(|e| e.to_string())
-}
+// `parse_cron` moved to `crate::cron_expr` so it's always compiled
+// (the queue's `runtime::cron` uses it too). Imported at the top
+// of this file via `use crate::cron_expr::parse_cron;`.
 
 #[cfg(test)]
 #[allow(
