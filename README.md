@@ -5,6 +5,80 @@ to run them. Extracted from a real Tauri desktop app — every crate has been
 running in production against ~2K Slack threads + GitHub issues for months
 before being broken out.
 
+## Screenshots
+
+The `forge-jobs-ui` Mission Control panel, in production. Every tab below
+is a route in the panel; charts come from `forge-charts` and update live
+as the queue churns. Run yours wherever you mount the consumer-implemented
+`QueueIpc` trait — Tauri desktop, plain HTTP, an in-process mock for tests.
+
+### Tabs
+
+**Overview** — workload timeline (enqueued / retried / completed / failed
+buckets), processing-time and end-to-end latency percentiles, status-counts
+strip, plus the live worker processes underneath.
+
+![Overview tab](docs/screenshots/overview_tab.png)
+
+**Jobs** — filterable job list with inline payload + last-error inspector.
+Filter by queue, status, kind, or substring across the payload.
+
+![Jobs tab](docs/screenshots/jobs_tab.png)
+
+**Scheduled** — future-dated work (throttle backoffs, `with_run_at`
+deferrals). Same table shape as Jobs but ordered by `scheduled_at`.
+
+![Scheduled tab](docs/screenshots/scheduled_tab.png)
+
+**Retries** — jobs that failed once and are waiting on their next
+attempt. Useful for spotting clusters of correlated failures.
+
+![Retries tab](docs/screenshots/retries_tab.png)
+
+**Dead** — dead-letter inspector. Jobs past `max_attempts` or routed
+straight to Dead by a handler (`JobOutcome::Dead`). Read the error
+chain that landed them here; re-enqueue or drop one at a time.
+
+![Dead tab](docs/screenshots/dead_tab.png)
+
+**Cron** — per-schedule status. Cron expression, next/last fire, the
+job kind it enqueues, enabled / disabled toggle. Lease-elected so only
+one replica fires each tick.
+
+![Cron tab](docs/screenshots/cron_tab.png)
+
+**Queues** — per-queue knobs. Worker count, retention windows, backoff
+curve (`backoff_enabled` / `base_seconds` / `max_seconds`). Edits take
+effect on the next tick — no worker restart.
+
+![Queues tab](docs/screenshots/queues_tab.png)
+
+### Detail panels
+
+**Live processes** — per-process strip on the Overview tab. Each worker
+shows its current job + last heartbeat. The reaper revives jobs whose
+worker stops heartbeating within `HEARTBEAT_INTERVAL`.
+
+![Live processes](docs/screenshots/live_processes.png)
+
+**Resources** — this-process CPU + memory + disk I/O + disk space.
+Sampled every `METRICS_TICK` and aggregated into per-minute buckets
+by the metrics roller (ADR 0009).
+
+![Resources](docs/screenshots/resource_container.png)
+
+**DB health** — storage backend visibility: read/write latency
+percentiles, ops-per-minute throughput, connection pool saturation.
+Same shape on SQLite and Postgres.
+
+![DB health](docs/screenshots/db_metrics.png)
+
+**Per-queue metrics** — per-queue latency + throughput on a configurable
+time range (5m / 30m / 1h / 3h / 6h / 24h / 7d, with drag-to-zoom).
+Mini chart per queue expands to the same `AreaChart` the overview uses.
+
+![Per-queue metrics](docs/screenshots/queue_metrics.png)
+
 ## Crates
 
 | Crate | crates.io | docs.rs | Description |
