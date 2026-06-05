@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Lets us hand-trigger the same checks before publishing a tag.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Workspace already opts into pedantic + nursery via [workspace.lints];
+  # this just makes any unexpected rustc warning a hard fail in CI too.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: clippy (workspace, default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  clippy-postgres:
+    name: clippy (forge-jobs, --features postgres)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Postgres adapter compiles, but its integration tests need a
+      # running Docker daemon for testcontainers — skip those in CI for
+      # now. This still type-checks the adapter against the trait
+      # surface so a feature-gated bit-rot can't sneak in.
+      - run: cargo clippy -p forge-jobs --features postgres --all-targets -- -D warnings
+
+  test:
+    name: test (workspace, default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --no-fail-fast
+
+  doc:
+    name: rustdoc (workspace, --features postgres)
+    runs-on: ubuntu-latest
+    env:
+      # Any unresolved intra-doc link or broken codeblock fails CI.
+      # Catches regressions before they render as broken on docs.rs.
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --features postgres
+
+  wasm:
+    name: wasm32 build (forge-charts, forge-jobs-ui)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # Both Leptos crates must compile cleanly for the WASM target —
+      # they're the consumer-facing CSR libs.
+      - run: cargo build -p forge-charts -p forge-jobs-ui --target wasm32-unknown-unknown
+
+  package:
+    name: cargo package (tarball smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Only the two independent crates can dry-run pre-first-publish —
+      # the downstream ones need their sibling on the registry first.
+      # This catches manifest issues (missing fields, oversized tarballs)
+      # before they bite a `cargo publish` invocation.
+      - run: cargo package -p forge-charts --allow-dirty
+      - run: cargo package -p forge-jobs --allow-dirty
