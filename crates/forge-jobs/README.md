@@ -1,34 +1,38 @@
 # forge-jobs
 
-Sidekiq-style job queue with embedded `SQLite` and pluggable Postgres.
+[![crates.io](https://img.shields.io/crates/v/forge-jobs.svg)](https://crates.io/crates/forge-jobs)
+[![docs.rs](https://img.shields.io/docsrs/forge-jobs)](https://docs.rs/forge-jobs)
+[![license](https://img.shields.io/crates/l/forge-jobs.svg)](https://github.com/dandush03/forge#license)
 
-A host-agnostic Rust crate: register handlers, enqueue jobs, the runtime
-claims / runs / finalizes them across N worker tasks. The same code path
-runs single-process on `SQLite` (local desktop) or multi-replica on
-Postgres (deployed service).
+Sidekiq-style job queue for Rust with embedded `SQLite` and pluggable
+Postgres. Register handlers, enqueue jobs; the runtime claims / runs /
+finalizes them across N worker tasks. **The same code path runs
+single-process on `SQLite` (local desktop, CLI tools) or multi-replica
+on Postgres (deployed service).** Battle-tested against ~2K tickets +
+~19K activities for months before breaking out into its own crate.
 
-Originally built for [`tech-admin`](../..) — Daniel's Tauri cockpit for
-the engineering org — and broken out as a standalone crate so other
-projects can pull it in without depending on the host's paths /
-secrets / IPC layers.
-
-## Status
-
-Initial 0.1 release. Internal API is mostly stable; a few naming
-passes may still happen pre-1.0. Until then, pin a specific commit
-if you want byte-for-byte reproducibility.
+## Install
 
 ```toml
 [dependencies]
 forge-jobs = "0.1"
+
+# Enable the optional Postgres adapter for deployed multi-replica use:
+forge-jobs = { version = "0.1", features = ["postgres"] }
 ```
 
-Or as a git dependency while we polish the published surface:
+Pre-publish (using the workspace directly):
 
 ```toml
 [dependencies]
-forge-jobs = { git = "https://github.com/dandush03/tech-admin", subdir = "crates/jobs" }
+forge-jobs = { git = "https://github.com/dandush03/forge" }
 ```
+
+## Status
+
+`0.1` — internal API mostly stable. A few naming passes may happen
+pre-`1.0`. Pin a specific version if you want byte-for-byte
+reproducibility during this window.
 
 ## Features
 
@@ -61,8 +65,10 @@ forge-jobs = { git = "https://github.com/dandush03/tech-admin", subdir = "crates
 
 ## What it doesn't give you
 
-- An HTTP transport (a separate `tech-admin-jobs-api` crate wires Axum
-  routes over the same handler bodies; out of scope here).
+- An HTTP transport — see the sibling crate
+  [`forge-jobs-api`](../forge-jobs-api/) for Axum routes + DTOs.
+- A UI — see [`forge-jobs-ui`](../forge-jobs-ui/) for a Leptos panel
+  that consumes a small `QueueIpc` trait.
 - A built-in paths resolver: you implement the small
   [`QueuePaths`](src/storage/paths.rs) trait so the queue stays
   reusable across hosts. See [`examples/minimal.rs`](examples/minimal.rs)

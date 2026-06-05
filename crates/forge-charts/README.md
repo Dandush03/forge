@@ -1,5 +1,9 @@
 # forge-charts
 
+[![crates.io](https://img.shields.io/crates/v/forge-charts.svg)](https://crates.io/crates/forge-charts)
+[![docs.rs](https://img.shields.io/docsrs/forge-charts)](https://docs.rs/forge-charts)
+[![license](https://img.shields.io/crates/l/forge-charts.svg)](https://github.com/dandush03/forge#license)
+
 Pure-Rust + SVG interactive charts for [Leptos](https://leptos.dev)
 (CSR). No JS, no canvas, no Tailwind — just `leptos`, `chrono`, and
 `web-sys`. The public API is project-agnostic: consumers pass
@@ -19,23 +23,17 @@ accessor closures over their own data type.
 
 ## Install
 
-The crate lives in this workspace; consumers add it via Cargo path
-dep (workspace member) or git dep.
-
-### Inside the same workspace
-
 ```toml
-# Cargo.toml
 [dependencies]
-forge-charts = { path = "crates/charts" }
+forge-charts = "0.1"
+leptos       = { version = "0.8", features = ["csr"] }
 ```
 
-### As an external project
+Or as a git dep during pre-publish:
 
 ```toml
-# Cargo.toml
 [dependencies]
-forge-charts = { git = "https://github.com/<your-org>/<your-repo>.git" }
+forge-charts = { git = "https://github.com/dandush03/forge" }
 ```
 
 You also need the bundled stylesheet served alongside your bundle.
