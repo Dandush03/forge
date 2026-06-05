@@ -10,10 +10,10 @@
 use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
+use forge_charts::{AreaChart, Series};
 use leptos::leptos_dom::helpers::set_interval_with_handle;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use forge_charts::{AreaChart, Series};
 
 use crate::chart_fmt::{
     BUCKET_SECS, TipRows, bytes_y_format, cpu_cores, fmt_bytes, pct_y_format, tooltip_for,

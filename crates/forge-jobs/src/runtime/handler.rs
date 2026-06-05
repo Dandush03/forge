@@ -40,6 +40,7 @@ pub trait JobHandler: Send + Sync + 'static {
 /// `FinalizeOutcome` (with backoff applied) before calling
 /// `JobQueue::finalize`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum JobOutcome {
     /// Success. Row → `done`.
     Done,

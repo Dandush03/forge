@@ -25,13 +25,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use serde_json::json;
 use forge_jobs::TimelineEventType;
 use forge_jobs::storage::postgres::PostgresStorage;
 use forge_jobs::storage::{
     CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue, JobStatus,
     NewCronSchedule, ProcessRegistry, QueueConfig,
 };
+use serde_json::json;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;

@@ -28,11 +28,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
+use forge_charts::{AreaChart, Series, TooltipSlot, YFormat, ZoomCommit};
 use leptos::leptos_dom::helpers::set_interval_with_handle;
 use leptos::prelude::*;
 use leptos::tachys::view::any_view::IntoAny;
 use leptos::task::spawn_local;
-use forge_charts::{AreaChart, Series, TooltipSlot, YFormat, ZoomCommit};
 
 use crate::ipc::{IpcCtx, TimelineBucket};
 
@@ -427,7 +427,7 @@ fn latency_tooltip_card(
 /// Y-axis formatter for the latency charts: same humanized duration as
 /// the tooltip, so a raw `6000000` ms tick reads as `1h 40m`. Built
 /// fresh per chart (the chart wants an owned `Arc`).
-pub(crate) fn latency_y_format() -> YFormat {
+pub fn latency_y_format() -> YFormat {
     Arc::new(fmt_latency_axis)
 }
 
@@ -449,7 +449,7 @@ fn fmt_latency_axis(v: f64) -> String {
 /// units so the magnitude reads at a glance. Integer-only math, so no
 /// float-cast lints and the value stays exact. Months are the 30-day
 /// approximation — fine for a latency readout, not for calendars.
-pub(crate) fn fmt_ms(ms: u64) -> String {
+pub fn fmt_ms(ms: u64) -> String {
     const UNITS: &[(u64, &str)] = &[
         (30 * 24 * 60 * 60 * 1000, "mo"),
         (7 * 24 * 60 * 60 * 1000, "w"),
@@ -529,7 +529,7 @@ fn fmt_bucket_size(secs: u32) -> String {
 /// from full date to wall-clock seconds based on the current bucket
 /// granularity — so a 24h view shows `HH:MM` while a per-second zoom
 /// shows `HH:MM:SS`.
-pub(crate) fn bucket_label(at: DateTime<Utc>, bucket_secs: u32) -> String {
+pub fn bucket_label(at: DateTime<Utc>, bucket_secs: u32) -> String {
     let local = at.with_timezone(&Local);
     if bucket_secs >= 24 * 60 * 60 {
         local.format("%a %-d").to_string()

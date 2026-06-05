@@ -8,9 +8,9 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use forge_charts::{TooltipSlot, YFormat};
 use leptos::prelude::*;
 use leptos::tachys::view::any_view::IntoAny;
-use forge_charts::{TooltipSlot, YFormat};
 
 use crate::timeline::bucket_label;
 

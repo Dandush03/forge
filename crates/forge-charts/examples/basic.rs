@@ -13,9 +13,9 @@
 
 use std::sync::Arc;
 
+use forge_charts::{AreaChart, Series};
 use leptos::prelude::*;
 use leptos::tachys::view::any_view::IntoAny;
-use forge_charts::{AreaChart, Series};
 
 /// One row of the consumer's domain data. The crate's API takes
 /// accessor closures into `T`, so you keep your own types.

@@ -43,6 +43,7 @@ use super::sqlite::SqliteStorage;
 /// which struct the rest of the keys deserialize into.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "adapter", rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum DatabaseConfig {
     Sqlite(SqliteConfig),
     Postgres(PostgresConfig),

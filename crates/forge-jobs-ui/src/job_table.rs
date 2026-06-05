@@ -235,9 +235,7 @@ pub fn JobTable(
                     }
                 }
                 Err(e) => {
-                    leptos::web_sys::console::warn_1(
-                        &format!("purge {label} failed: {e}").into(),
-                    );
+                    leptos::web_sys::console::warn_1(&format!("purge {label} failed: {e}").into());
                 }
             }
         });

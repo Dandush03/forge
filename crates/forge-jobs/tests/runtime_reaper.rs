@@ -17,10 +17,10 @@
 use std::sync::Arc;
 
 use chrono::{Duration as ChronoDuration, Utc};
-use serde_json::json;
 use forge_jobs::storage::sqlite::SqliteStorage;
 use forge_jobs::storage::{EnqueueRequest, JobStatus};
 use forge_jobs::{Storage as JobStorage, reap_stale_jobs};
+use serde_json::json;
 
 async fn fresh() -> JobStorage {
     let s = Arc::new(

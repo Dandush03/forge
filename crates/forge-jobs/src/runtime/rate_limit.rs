@@ -25,6 +25,7 @@ const RETRY_AFTER_CEILING_SECS: f64 = 60.0;
 /// `retry_after` so handlers can plug it straight into
 /// `JobOutcome::Throttled`.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub enum AcquireOutcome {
     /// Token spent; handler should proceed.
     Granted,

@@ -42,20 +42,40 @@
 //!   `<Stylesheet text=PANEL_CSS />`.
 //! - Render `<QueueRoot/>` wherever the panel should live.
 
-pub mod bulk_actions;
-pub mod chart_fmt;
-pub mod cron;
-pub mod db_health;
-pub mod failed;
-pub mod inspector;
+// `ipc` stays `pub` — consumers implement `QueueIpc` against the types
+// in this module. Everything else is internal UI machinery exposed
+// only via the re-exports below; `pub(crate)` so the SemVer surface
+// is the named items, not the module layout. The `unreachable_pub`
+// allow keeps inner `pub fn` / `pub struct` markers as module-local
+// API documentation rather than forcing every item to be `pub(crate)`.
 pub mod ipc;
-pub mod job_table;
-pub mod overview;
-pub mod per_queue;
-pub mod queue_root;
-pub mod resources;
-pub mod scheduled;
-pub mod timeline;
+
+#[allow(unreachable_pub)]
+pub(crate) mod bulk_actions;
+#[allow(unreachable_pub)]
+pub(crate) mod chart_fmt;
+#[allow(unreachable_pub)]
+pub(crate) mod cron;
+#[allow(unreachable_pub)]
+pub(crate) mod db_health;
+#[allow(unreachable_pub)]
+pub(crate) mod failed;
+#[allow(unreachable_pub)]
+pub(crate) mod inspector;
+#[allow(unreachable_pub)]
+pub(crate) mod job_table;
+#[allow(unreachable_pub)]
+pub(crate) mod overview;
+#[allow(unreachable_pub)]
+pub(crate) mod per_queue;
+#[allow(unreachable_pub)]
+pub(crate) mod queue_root;
+#[allow(unreachable_pub)]
+pub(crate) mod resources;
+#[allow(unreachable_pub)]
+pub(crate) mod scheduled;
+#[allow(unreachable_pub)]
+pub(crate) mod timeline;
 
 pub use ipc::{
     CleanupReport, CronSchedule, DbHealthBucket, DbHealthHostSeries, IpcCtx, IpcError,

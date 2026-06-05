@@ -7,11 +7,12 @@
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
 use forge_jobs::StorageError;
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Error {
     /// Operator-supplied input was wrong. 400.
     Validation { field: String, msg: String },
