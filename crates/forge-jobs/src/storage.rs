@@ -194,7 +194,8 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
     /// `Started` event for that attempt; the reaper revives the row
     /// and the re-claim writes a fresh `Started`, so the chart is
     /// only inconsistent for the crash window. See the inline note
-    /// in [`crates/jobs/src/storage/sqlite/jobs.rs::claim_next`].
+    /// next to `claim_next` in the `SQLite` backend
+    /// (`src/storage/sqlite/jobs.rs`).
     async fn list_for_timeline(
         &self,
         from: DateTime<Utc>,

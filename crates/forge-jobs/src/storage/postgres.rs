@@ -108,10 +108,10 @@ impl PostgresStorage {
         .await
     }
 
-    /// Construct from a pre-built [`PgConnectOptions`]. Avoids URL
-    /// encoding for credentials with special characters — used by the
-    /// `queue_database.toml` loader, which has discrete `host` / `username`
-    /// / `password` fields.
+    /// Construct from a pre-built [`sqlx::postgres::PgConnectOptions`].
+    /// Avoids URL encoding for credentials with special characters —
+    /// used by the `queue_database.toml` loader, which has discrete
+    /// `host` / `username` / `password` fields.
     pub async fn open_with_options(
         opts: sqlx::postgres::PgConnectOptions,
         max_connections: u32,
