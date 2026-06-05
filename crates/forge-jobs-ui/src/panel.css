@@ -1,0 +1,1191 @@
+/* tech-admin-jobs-ui — Jobs panel stylesheet.
+ *
+ * Consumed via the `PANEL_CSS` constant exported from `lib.rs`. The
+ * consumer injects it once at the app root:
+ *   <Stylesheet text=tech_admin_jobs_ui::PANEL_CSS />
+ *
+ * Color tokens reference the consumer's design tokens
+ * (--accent, --fg-muted, --bg-elev, etc.). The panel inherits the
+ * host app's palette so it visually belongs wherever it lands.
+ */
+
+.queue-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0;
+}
+.queue-panel-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 8px 16px;
+}
+.queue-panel-head h2 {
+  margin: 0;
+  font-size: 18px;
+  grid-column: 1;
+}
+.queue-panel-sub {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12.5px;
+  max-width: 720px;
+  grid-column: 1;
+  grid-row: 2;
+}
+.queue-panel-actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-poll-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.queue-poll-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font: inherit;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.queue-poll-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.queue-demo-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.queue-demo-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.queue-panel-err {
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12.5px;
+}
+.queue-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+
+/* ── per-queue card ────────────────────────────────────────────── */
+
+.queue-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.queue-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-sm);
+}
+.queue-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.queue-card-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent-tickets);
+  flex-shrink: 0;
+}
+.queue-card-dot.is-paused { background: var(--accent-secrets); }
+.queue-card-dot.is-down   { background: var(--danger); }
+.queue-card-dot.is-live   { background: var(--accent-tickets); }
+.queue-card-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.queue-card-meta {
+  color: var(--fg-muted);
+  font-size: 12.5px;
+}
+.queue-card-controls {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-card-workers {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.queue-card-workers input {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+.queue-card-pause {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.queue-card-pause:hover {
+  border-color: var(--accent);
+}
+.queue-card-pause.is-paused {
+  background: var(--accent-secrets);
+  border-color: var(--accent-secrets);
+  color: white;
+}
+
+/* ── status chips ─────────────────────────────────────────────── */
+
+.queue-card-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.queue-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.queue-chip-n {
+  color: var(--fg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.queue-chip.is-zero { opacity: 0.5; }
+.queue-chip.is-pending      .queue-chip-n { color: var(--accent); }
+.queue-chip.is-scheduled    .queue-chip-n { color: var(--accent-tickets); }
+.queue-chip.is-in_progress  { border-color: var(--accent); background: var(--accent-tint); }
+.queue-chip.is-in_progress  .queue-chip-n { color: var(--accent); }
+.queue-chip.is-done         .queue-chip-n { color: var(--accent-tickets); }
+.queue-chip.is-failed       { border-color: var(--accent-secrets); }
+.queue-chip.is-failed       .queue-chip-n { color: var(--accent-secrets); }
+.queue-chip.is-dead         { border-color: var(--danger); }
+.queue-chip.is-dead         .queue-chip-n { color: var(--danger); }
+
+/* ── process list ─────────────────────────────────────────────── */
+
+.queue-card-procs {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+.queue-card-procs > summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  user-select: none;
+}
+.queue-card-procs[open] > summary {
+  margin-bottom: 6px;
+}
+.queue-card-proc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.queue-proc {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) minmax(0, 1.5fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.queue-proc .hb {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-tickets);
+}
+.queue-proc .hb.is-ok   { background: var(--accent-tickets); }
+.queue-proc .hb.is-warn { background: var(--accent-secrets); }
+.queue-proc .hb.is-down { background: var(--danger); }
+.queue-proc-id {
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-proc-job {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-proc-uptime {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Backoff cool-down countdown badge in the card header. Amber to match
+ * the Retried timeline series — both signal "this queue is backing off". */
+.queue-card-throttle {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  white-space: nowrap;
+}
+
+/* ── footer (retention + backoff) ──────────────────────────────── */
+
+.queue-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 11.5px;
+  color: var(--fg-faint);
+}
+.queue-card-backoff-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+.queue-card-backoff-toggle input[type="checkbox"] { cursor: pointer; }
+.queue-card-retain input:disabled { opacity: 0.45; }
+
+/* ── Queue: timeline ─────────────────────────────────────────── */
+
+.queue-timeline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: 10px 12px 4px;
+  box-shadow: var(--shadow-sm);
+}
+.queue-timeline-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.queue-timeline-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.queue-timeline-totals {
+  color: var(--fg-muted);
+  font-size: 12px;
+  flex: 1;
+}
+.queue-timeline-window {
+  display: inline-flex;
+  gap: 4px;
+}
+.queue-window-btn {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-window-btn.active {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.queue-timeline-chart { min-height: 260px; }
+
+/* Charts series colors (consumed by forge-charts via CSS vars). */
+:root {
+  --charts-series-queue-enqueued: var(--accent);
+  --charts-series-queue-retried: #f59e0b;   /* amber — throttle / retry re-queues */
+  --charts-series-queue-completed: var(--accent-tickets);
+  --charts-series-queue-failed: var(--danger);
+  --charts-series-queue-enqueued-soft: var(--accent-tint);
+  --charts-series-queue-retried-soft: rgba(245, 158, 11, 0.35);
+  --charts-series-queue-completed-soft: rgba(34, 197, 94, 0.35);
+  --charts-series-queue-failed-soft: rgba(239, 68, 68, 0.35);
+  /* Latency percentiles: green p50 → amber p95 → red p99 (tail = hot). */
+  --charts-series-queue-p50: var(--accent-tickets);
+  --charts-series-queue-p95: #f59e0b;
+  --charts-series-queue-p99: var(--danger);
+  --charts-series-queue-p50-soft: rgba(34, 197, 94, 0.35);
+  --charts-series-queue-p95-soft: rgba(245, 158, 11, 0.35);
+  --charts-series-queue-p99-soft: rgba(239, 68, 68, 0.35);
+}
+.queue-series-enqueued { color: var(--accent); }
+.queue-series-retried { color: var(--charts-series-queue-retried); }
+.queue-series-completed { color: var(--accent-tickets); }
+.queue-series-failed { color: var(--danger); }
+.queue-series-p50 { color: var(--charts-series-queue-p50); }
+.queue-series-p95 { color: var(--charts-series-queue-p95); }
+.queue-series-p99 { color: var(--charts-series-queue-p99); }
+
+/* Chart per-series stroke + gradient hooks. The charts crate ships
+ * rules only for its bundled `opened`/`closed` color classes; any
+ * `Series::area(_, "queue-…")` color we use needs explicit rules
+ * here or the SVG paths render invisible. */
+.charts-line.charts-series-queue-enqueued   { stroke: var(--charts-series-queue-enqueued); }
+.charts-line.charts-series-queue-retried   { stroke: var(--charts-series-queue-retried); }
+.charts-line.charts-series-queue-completed  { stroke: var(--charts-series-queue-completed); }
+.charts-line.charts-series-queue-failed     { stroke: var(--charts-series-queue-failed); }
+.charts-line.charts-series-queue-p50        { stroke: var(--charts-series-queue-p50); }
+.charts-line.charts-series-queue-p95        { stroke: var(--charts-series-queue-p95); }
+.charts-line.charts-series-queue-p99        { stroke: var(--charts-series-queue-p99); }
+
+.charts-dot.charts-series-queue-enqueued    { background: var(--charts-series-queue-enqueued); }
+.charts-dot.charts-series-queue-retried    { background: var(--charts-series-queue-retried); }
+.charts-dot.charts-series-queue-completed   { background: var(--charts-series-queue-completed); }
+.charts-dot.charts-series-queue-failed      { background: var(--charts-series-queue-failed); }
+.charts-dot.charts-series-queue-p50         { background: var(--charts-series-queue-p50); }
+.charts-dot.charts-series-queue-p95         { background: var(--charts-series-queue-p95); }
+.charts-dot.charts-series-queue-p99         { background: var(--charts-series-queue-p99); }
+
+.charts-legend-item:has(.charts-series-queue-enqueued)  .charts-legend-dot { color: var(--charts-series-queue-enqueued); }
+.charts-legend-item:has(.charts-series-queue-retried)  .charts-legend-dot { color: var(--charts-series-queue-retried); }
+.charts-legend-item:has(.charts-series-queue-completed) .charts-legend-dot { color: var(--charts-series-queue-completed); }
+.charts-legend-item:has(.charts-series-queue-failed)    .charts-legend-dot { color: var(--charts-series-queue-failed); }
+.charts-legend-item:has(.charts-series-queue-p50)       .charts-legend-dot { color: var(--charts-series-queue-p50); }
+.charts-legend-item:has(.charts-series-queue-p95)       .charts-legend-dot { color: var(--charts-series-queue-p95); }
+.charts-legend-item:has(.charts-series-queue-p99)       .charts-legend-dot { color: var(--charts-series-queue-p99); }
+
+.charts-gradient.charts-series-queue-enqueued .charts-gradient-top    { stop-color: var(--charts-series-queue-enqueued-soft);  stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-enqueued .charts-gradient-bottom { stop-color: var(--charts-series-queue-enqueued-soft);  stop-opacity: 0.05; }
+.charts-gradient.charts-series-queue-retried .charts-gradient-top    { stop-color: var(--charts-series-queue-retried-soft); stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-retried .charts-gradient-bottom { stop-color: var(--charts-series-queue-retried-soft); stop-opacity: 0.05; }
+.charts-gradient.charts-series-queue-completed .charts-gradient-top    { stop-color: var(--charts-series-queue-completed-soft); stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-completed .charts-gradient-bottom { stop-color: var(--charts-series-queue-completed-soft); stop-opacity: 0.05; }
+.charts-gradient.charts-series-queue-failed .charts-gradient-top    { stop-color: var(--charts-series-queue-failed-soft); stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-failed .charts-gradient-bottom { stop-color: var(--charts-series-queue-failed-soft); stop-opacity: 0.05; }
+.charts-gradient.charts-series-queue-p50 .charts-gradient-top    { stop-color: var(--charts-series-queue-p50-soft); stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-p50 .charts-gradient-bottom { stop-color: var(--charts-series-queue-p50-soft); stop-opacity: 0.05; }
+.charts-gradient.charts-series-queue-p95 .charts-gradient-top    { stop-color: var(--charts-series-queue-p95-soft); stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-p95 .charts-gradient-bottom { stop-color: var(--charts-series-queue-p95-soft); stop-opacity: 0.05; }
+.charts-gradient.charts-series-queue-p99 .charts-gradient-top    { stop-color: var(--charts-series-queue-p99-soft); stop-opacity: 0.85; }
+.charts-gradient.charts-series-queue-p99 .charts-gradient-bottom { stop-color: var(--charts-series-queue-p99-soft); stop-opacity: 0.05; }
+
+/* ── latency charts (p50/p95/p99) — two independent cards ──────── */
+/* The row is a transparent grid; the gray page background shows
+ * through the gap, so each chart reads as its own card. */
+.queue-metrics-row {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+/* min-width:0 lets each card shrink so the SVG sizes to its track
+ * instead of forcing the column wider and overflowing. */
+.queue-metrics-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: 10px 12px 4px;
+  box-shadow: var(--shadow-sm);
+}
+.queue-metrics-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.queue-metrics-card-head h3 { margin: 0; }
+.queue-metrics-sub { font-size: 11.5px; color: var(--fg-faint); }
+@media (max-width: 860px) { .queue-metrics-row { grid-template-columns: 1fr; } }
+/* Duration labels ("33m 20s", "1h 40m") are wider than the default
+ * 5-digit gutter — widen it so they don't overflow. */
+.queue-latency-chart { --charts-y-gutter: 72px; }
+
+/* ── per-queue metrics (collapsible) ───────────────────────────── */
+.queue-perqueue { margin-top: 14px; }
+.queue-perqueue-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 0;
+}
+.queue-perqueue-head h3 { margin: 0; }
+.queue-perqueue-toggle {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  width: 14px;
+}
+.queue-perqueue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+/* Grid variant of `.queue-perqueue-body` used by section-level panels
+ * (Resources, DB health) where each chart is its own card — the
+ * transparent gap between cards reads as page background, giving the
+ * "one card per chart" feel the per-queue panel doesn't need. */
+.queue-section-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+.queue-section-grid-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 1200px) { .queue-section-grid-4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 700px)  { .queue-section-grid, .queue-section-grid-4 { grid-template-columns: 1fr; } }
+/* 3 mini-charts per card row; min-width:0 lets each shrink to its
+ * track instead of overflowing. */
+.queue-perqueue-charts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.queue-perqueue-charts > div { min-width: 0; }
+/* The Resources card holds 4 charts (CPU / RAM / Disk I/O / Disk space). */
+.queue-perqueue-charts-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 1200px) { .queue-perqueue-charts-4 { grid-template-columns: repeat(2, 1fr); } }
+/* Wider y-gutter: mini-chart tick labels are durations / byte sizes
+ * ("2s 500ms", "572.2 MB") that overflow the default 5-digit gutter and
+ * collide with the chart title. */
+.queue-perqueue-chart { --charts-y-gutter: 72px; }
+/* Breathing room so the topmost y-tick can't touch the title above it. */
+.queue-perqueue-charts .queue-metrics-label { margin-bottom: 8px; }
+@media (max-width: 980px) {
+  .queue-perqueue-charts { grid-template-columns: 1fr; }
+}
+.queue-metrics-label { font-size: 11.5px; color: var(--fg-faint); margin-bottom: 4px; }
+@media (max-width: 860px) { .queue-metrics-charts { grid-template-columns: 1fr; } }
+
+/* ── Queue: failed panel ─────────────────────────────────────── */
+
+.queue-failed {
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.queue-failed-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.queue-failed-title {
+  color: var(--danger);
+  font-weight: 600;
+  flex: 1;
+}
+.queue-failed-retry-all {
+  padding: 4px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--danger);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.queue-failed-retry-all:hover {
+  background: var(--danger);
+  color: white;
+}
+.queue-failed-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.queue-failed-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--fg-muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-failed-row td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-failed-row:hover { background: var(--bg-hover); cursor: pointer; }
+.queue-failed-err {
+  font-family: ui-monospace, monospace;
+  color: var(--danger);
+  font-size: 12px;
+  max-width: 360px;
+}
+.queue-failed-attempts {
+  margin-left: 6px;
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+.queue-failed-retry {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-failed-retry:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Queue: status badges (shared by failed + table + drawer) ── */
+
+.queue-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.queue-badge.is-pending     { background: var(--accent-soft); color: var(--accent); }
+.queue-badge.is-in_progress { background: var(--accent-tint); color: var(--accent); }
+.queue-badge.is-done        { background: rgba(22, 163, 74, 0.12); color: var(--accent-tickets); }
+.queue-badge.is-failed      { background: rgba(180, 83, 9, 0.12); color: var(--accent-secrets); }
+.queue-badge.is-dead        { background: var(--danger-soft); color: var(--danger); }
+
+/* ── Queue: jobs table ───────────────────────────────────────── */
+
+.queue-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  padding: 10px 12px;
+}
+.queue-jobs-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.queue-jobs-head h3 { margin: 0; font-size: 14px; }
+.queue-jobs-total {
+  color: var(--fg-muted);
+  font-size: 12px;
+  flex: 1;
+}
+.queue-jobs-refresh {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--fg-faint);
+  margin-left: auto;
+  margin-right: 8px;
+}
+.queue-jobs-clear {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-jobs-clear:hover { border-color: var(--accent); color: var(--accent); }
+.queue-jobs-purge {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-jobs-purge:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.queue-jobs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.queue-filter,
+.queue-filter-search {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+}
+.queue-filter-search {
+  flex: 1;
+  min-width: 180px;
+}
+.queue-jobs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.queue-jobs-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+}
+.queue-jobs-checkcol { width: 24px; }
+.queue-jobs-row {
+  cursor: pointer;
+}
+.queue-jobs-row td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-jobs-row:hover { background: var(--bg-hover); }
+.queue-jobs-row.selected { background: var(--accent-tint); }
+.queue-jobs-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+.queue-jobs-paging {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-page-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-page-btn:disabled { opacity: 0.4; cursor: default; }
+.queue-page-label {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.queue-jobs-bulk {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.5;
+  transition: opacity 100ms;
+}
+.queue-jobs-bulk.active { opacity: 1; }
+.queue-jobs-selected {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.queue-bulk-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-bulk-btn:hover { border-color: var(--accent); color: var(--accent); }
+.queue-bulk-btn:disabled { opacity: 0.4; cursor: default; }
+.queue-bulk-btn.is-danger:hover {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: white;
+}
+
+/* ── Queue: inspector drawer ─────────────────────────────────── */
+
+.queue-drawer-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 30, 0.35);
+  z-index: 50;
+}
+.queue-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 480px;
+  max-width: 90vw;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  z-index: 51;
+}
+.queue-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-drawer-head h3 { margin: 0; font-size: 14px; flex: 1; }
+.queue-drawer-close {
+  padding: 0 10px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+.queue-drawer-body {
+  padding: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+.queue-drawer-loading,
+.queue-drawer-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--fg-muted);
+}
+.queue-drawer-meta {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 4px 12px;
+  margin: 0 0 12px;
+}
+.queue-drawer-meta dt {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.queue-drawer-meta dd {
+  margin: 0;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+.queue-drawer-id {
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+.queue-drawer-err {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--danger);
+}
+.queue-drawer-section { margin-bottom: 14px; }
+.queue-drawer-section h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.queue-drawer-payload {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-muted);
+  border-radius: var(--radius-sm);
+  font: 12px ui-monospace, monospace;
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.queue-drawer-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.queue-drawer-history-row {
+  display: grid;
+  grid-template-columns: 110px 140px 1fr;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px dotted var(--border);
+  font-size: 12px;
+}
+.queue-drawer-history-attempt { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.queue-drawer-history-at { color: var(--fg-faint); font-family: ui-monospace, monospace; }
+.queue-drawer-history-msg { color: var(--danger); word-break: break-word; }
+.queue-drawer-foot {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── tab nav ───────────────────────────────────────────────────── */
+
+.queue-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+  margin: 16px 0 0;
+}
+.queue-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-muted);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.queue-tab:hover { color: var(--fg); }
+.queue-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.queue-tab-body {
+  padding: 16px 0;
+}
+
+/* ── Overview tab ──────────────────────────────────────────────── */
+
+.queue-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.queue-overview-summary {
+  padding: 4px 0;
+}
+.queue-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.queue-overview-procs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.queue-overview-procs h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.queue-procs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.queue-procs-table th,
+.queue-procs-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-procs-table th {
+  font-weight: 500;
+  color: var(--fg-muted);
+}
+.queue-procs-table code {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+/* ── Retries vs Dead surfaces ──────────────────────────────────── */
+
+.queue-failed.is-retries .queue-failed-title { color: var(--accent-secrets); }
+.queue-failed.is-dead    .queue-failed-title { color: var(--danger); }
+
+/* ── Jobs sub-tabs (status filter as tabs) ─────────────────────── */
+
+.queue-jobs-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 0;
+}
+.queue-subtab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-muted);
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.queue-subtab:hover { color: var(--fg); }
+.queue-subtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+/* ── Job heartbeat chip ────────────────────────────────────────── */
+
+.queue-hb {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.queue-hb.is-idle { color: var(--fg-faint); }
+.queue-hb.is-ok    { color: var(--accent-tickets); }
+.queue-hb.is-warn  { color: var(--accent-secrets); }
+.queue-hb.is-stale { color: var(--danger); font-weight: 600; }
+
+/* ── Cron tab ──────────────────────────────────────────────────── */
+
+.queue-cron {
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.queue-cron-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.queue-cron-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.queue-cron-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.queue-cron-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.queue-cron-row.is-paused {
+  opacity: 0.7;
+}
+.queue-cron-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-cron-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.queue-cron-dot.is-on  { background: var(--accent-tickets); }
+.queue-cron-dot.is-off { background: var(--fg-faint); }
+.queue-cron-name {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+  font-size: 13px;
+}
+.queue-cron-meta {
+  font-size: 12px;
+  color: var(--fg-muted);
+  flex: 1;
+}
+.queue-cron-toggle,
+.queue-cron-run,
+.queue-cron-save {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-cron-toggle:hover,
+.queue-cron-run:hover,
+.queue-cron-save:hover {
+  border-color: var(--accent);
+}
+.queue-cron-toggle.is-paused {
+  background: var(--accent-tint);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.queue-cron-save:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.queue-cron-expr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.queue-cron-expr-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 60px;
+}
+.queue-cron-expr-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--fg);
+}
+.queue-cron-expr-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.queue-cron-save-err {
+  color: var(--danger);
+  font-size: 12px;
+}
+.queue-cron-row-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.queue-cron-err {
+  color: var(--danger);
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+
+/* ── Scheduled tab (one-off future-dated jobs) ───────────────────── */
+.queue-scheduled {
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.queue-scheduled-head h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.queue-scheduled-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--fg-muted);
+  max-width: 70ch;
+  line-height: 1.5;
+}
+.queue-scheduled-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.queue-scheduled-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+}
+.queue-scheduled-row td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.queue-scheduled-row:hover { background: var(--bg-hover); }
+.queue-scheduled-kind {
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+}
+.queue-scheduled-queue { color: var(--fg-muted); }
+.queue-scheduled-at { white-space: nowrap; }
+.queue-scheduled-relative {
+  white-space: nowrap;
+  color: var(--fg-muted);
+}
+.queue-scheduled-actions { text-align: right; }
+.queue-scheduled-run-now {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-scheduled-run-now:hover { border-color: var(--accent); }

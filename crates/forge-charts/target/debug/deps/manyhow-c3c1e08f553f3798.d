@@ -1,0 +1,11 @@
+/home/dlaloush/rust/forge-charts/target/debug/deps/manyhow-c3c1e08f553f3798.d: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/span_ranged.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/macro_rules.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/error.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/parse_to_tokens.rs
+
+/home/dlaloush/rust/forge-charts/target/debug/deps/libmanyhow-c3c1e08f553f3798.rlib: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/span_ranged.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/macro_rules.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/error.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/parse_to_tokens.rs
+
+/home/dlaloush/rust/forge-charts/target/debug/deps/libmanyhow-c3c1e08f553f3798.rmeta: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/span_ranged.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/macro_rules.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/error.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/parse_to_tokens.rs
+
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/lib.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/span_ranged.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/macro_rules.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/error.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/manyhow-0.11.4/src/parse_to_tokens.rs:

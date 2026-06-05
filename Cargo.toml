@@ -1,0 +1,49 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+# Workspace-wide dependency versions. Each crate references via
+# `dep = { workspace = true }` so a bump here lands everywhere.
+[workspace.dependencies]
+tokio              = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "fs", "signal", "process"] }
+tokio-util         = { version = "0.7", features = ["rt"] }
+serde              = { version = "1", features = ["derive"] }
+serde_json         = "1"
+chrono             = { version = "0.4", features = ["serde"] }
+thiserror          = "2"
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+async-trait        = "0.1"
+anyhow             = "1"
+
+# Test-only / dev workspace deps
+tempfile           = "3"
+
+# ---------------------------------------------------------------------------
+# Workspace lints — clippy policy for every crate in the workspace.
+# Each crate opts in via `[lints] workspace = true`. Inlined from the
+# original tech-admin workspace so the standards travel with the code.
+# ---------------------------------------------------------------------------
+
+[workspace.lints.rust]
+unsafe_code                   = "deny"
+missing_debug_implementations = "warn"
+rust_2018_idioms              = { level = "warn", priority = -1 }
+unreachable_pub               = "warn"
+
+[workspace.lints.clippy]
+pedantic        = { level = "warn", priority = -1 }
+nursery         = { level = "warn", priority = -1 }
+unwrap_used     = "deny"
+expect_used     = "warn"
+panic           = "deny"
+todo            = "warn"
+dbg_macro       = "deny"
+print_stdout    = "warn"
+print_stderr    = "warn"
+mod_module_files = "warn"
+
+[profile.release]
+lto           = "thin"
+codegen-units = 1
+strip         = "symbols"

@@ -1,0 +1,67 @@
+[package]
+name = "forge-jobs"
+version = "0.1.0"
+edition = "2024"
+description = "Sidekiq-style job queue with embedded SQLite and pluggable Postgres. Per-queue workers + cron + cluster-wide rate-limit budget + cancellation that survives across replicas."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dandush03/tech-admin"
+readme = "README.md"
+publish = true
+
+[dependencies]
+tokio       = { workspace = true }
+tokio-util  = { workspace = true }
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+# 6-field cron expressions (sec min hour dom mon dow). Validated +
+# evaluated server-side via `cron::Schedule::from_str(...)`.
+cron        = "0.16"
+# SQL queue backend. `runtime-tokio-rustls` keeps us on rustls (matches
+# the rest of the workspace via the host's TLS install in main.rs).
+# `chrono` + `json` give us DateTime<Utc> and serde_json::Value column
+# mappings; `migrate` powers the embedded schema migrations under
+# `storage/sqlite/migrations/`.
+sqlx        = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "chrono", "json", "migrate", "macros"] }
+# Stable, sortable per-process identifier minted at boot; used to name
+# worker processes (`{queue}-{slot}-{ulid}`) and group them by host.
+ulid        = "1"
+# Cross-platform per-process resource sampling for the metrics roller's
+# cpu_pct/rss_bytes/disk gauges (ADR 0009). `system` = CPU/memory/process
+# (incl. per-process disk I/O); `disk` = mounted-volume space. No
+# network/component/user collectors, no rayon. Portable — avoids reading
+# /proc directly (CLAUDE.md §8).
+sysinfo     = { version = "0.39", default-features = false, features = ["system", "disk"] }
+uuid        = { version = "1", features = ["serde"], optional = true }
+# Rails-style `database.toml` (adapter, host/port/credentials). Same
+# crate `tech-admin-secrets` already uses for `secrets.toml`.
+toml        = "1"
+# Only used by the `jobs-db` admin CLI (src/bin/jobs-db.rs) to attach
+# stdout logging — the host wires its own subscriber. Workspace dep
+# the host already pulls in, so no real cost.
+tracing-subscriber = { workspace = true }
+
+[features]
+default = []
+# Enables the optional Postgres storage adapter at
+# `storage/postgres/`. Off by default — the Tauri host pins
+# SQLite; service / k8s deploys flip `--features postgres` on
+# the binary that drives a cluster-shared queue.
+postgres = ["sqlx/postgres", "sqlx/uuid", "uuid"]
+
+[dev-dependencies]
+tokio    = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
+tempfile = { workspace = true }
+# Postgres integration tests (added in subsequent commits of Phase
+# 2.2) will spin up an ephemeral pg instance via testcontainers.
+# Listed here so the deps land in one place; the tests themselves
+# are `#[cfg(feature = "postgres")]`-gated so the default build
+# doesn't run them.
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres"] }
+
+[lints]
+workspace = true

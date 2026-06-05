@@ -1,0 +1,11 @@
+/home/dlaloush/rust/forge-charts/target/debug/deps/convert_case-930ce2a0ef34c1ed.d: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/boundary.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/case.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/converter.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/pattern.rs
+
+/home/dlaloush/rust/forge-charts/target/debug/deps/libconvert_case-930ce2a0ef34c1ed.rlib: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/boundary.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/case.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/converter.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/pattern.rs
+
+/home/dlaloush/rust/forge-charts/target/debug/deps/libconvert_case-930ce2a0ef34c1ed.rmeta: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/boundary.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/case.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/converter.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/pattern.rs
+
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/lib.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/boundary.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/case.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/converter.rs:
+/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/convert_case-0.11.0/src/pattern.rs:

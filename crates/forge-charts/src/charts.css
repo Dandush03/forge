@@ -1,0 +1,549 @@
+/* forge-charts — default stylesheet.
+ *
+ * Consumers inject this once at the app root via
+ *     <Stylesheet text=forge_charts::CHART_CSS />
+ *
+ * Theme via CSS variables on `:root` or any parent of `.charts-root`.
+ * Per-series colors come from `--charts-series-<color_class>` /
+ * `--charts-series-<color_class>-soft` (the soft variant fades into
+ * the gradient stop). The defaults below give a clean ApexCharts-
+ * inspired blue/teal palette; override per-app as needed.
+ */
+
+:root {
+  --charts-fg: rgb(17 24 39);
+  --charts-fg-muted: rgb(107 114 128);
+  --charts-fg-faint: rgb(156 163 175);
+  --charts-grid-color: rgba(17, 24, 39, 0.06);
+  --charts-bg: transparent;
+
+  /* Default series palette. Add more --charts-series-<name>* pairs
+   * in the consumer app to extend. */
+  --charts-series-opened: rgb(43, 127, 255);
+  --charts-series-opened-soft: rgba(142, 197, 255, 0.55);
+  --charts-series-closed: rgb(34, 197, 94);
+  --charts-series-closed-soft: rgba(134, 239, 172, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --charts-fg: rgb(229 231 235);
+    --charts-fg-muted: rgb(156 163 175);
+    --charts-fg-faint: rgb(107 114 128);
+    --charts-grid-color: rgba(229, 231, 235, 0.08);
+  }
+}
+
+/* ---------- outer container ---------- */
+
+.charts-root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* Set by the AreaChart component via inline style:
+   *   --charts-height: 320px;
+   * Falls back to 320px if not provided.
+   *
+   * Use a *fixed* height (not min-height) so the legend + plot live
+   * inside a bounded box. With min-height the SVG's intrinsic
+   * viewBox aspect ratio can drive the column taller than its track
+   * and visually bleed into the legend above it. */
+  height: var(--charts-height, 320px);
+  color: var(--charts-fg);
+  background: var(--charts-bg);
+  font-family: inherit;
+  font-size: 12px;
+  position: relative;
+}
+
+.charts-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--charts-fg-faint);
+  font-style: italic;
+}
+
+/* ---------- legend ---------- */
+
+.charts-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Wider horizontal gap so adjacent legend items feel like distinct
+   * controls instead of one run-on row; row-gap keeps wrapped lines
+   * from sticking together when the chart is narrow. */
+  column-gap: 28px;
+  row-gap: 8px;
+  padding: 6px 8px 14px 8px;
+  color: var(--charts-fg-muted);
+}
+.charts-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Hidden series (toggled off via a name click): dim the whole item and
+ * strike the label so it's obviously excluded from the plot. */
+.charts-legend-item.is-hidden {
+  opacity: 0.4;
+}
+.charts-legend-item.is-hidden .charts-legend-name {
+  text-decoration: line-through;
+}
+/* The swatch (dot + hidden color input) is the color-picker affordance;
+ * the name beside it is the show/hide toggle. Keeping them separate is
+ * what lets a name click mean "hide" instead of "open picker". */
+.charts-legend-swatch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.charts-legend-name {
+  cursor: pointer;
+}
+.charts-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.charts-legend-name {
+  color: var(--charts-fg);
+  font-size: 12.5px;
+}
+/* The swatch is a <label> wrapping a hidden color input on top of the
+ * dot. Clicking the dot opens the native picker; the dot stays the
+ * visible affordance. `appearance: none` plus sizing the input to match
+ * the dot keeps the picker invisible on Chromium + Firefox + Safari. */
+.charts-legend-item {
+  user-select: none;
+}
+.charts-legend-swatch:hover .charts-legend-dot {
+  transform: scale(1.15);
+  transition: transform 120ms ease-out;
+}
+.charts-legend-color-input {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.charts-legend-color-input::-webkit-color-swatch-wrapper { padding: 0; }
+.charts-legend-color-input::-webkit-color-swatch { border: none; }
+
+/* ---------- plot area ---------- */
+
+.charts-plot {
+  /* Y-axis gutter is a CSS var so consumers with wide tick labels
+   * (durations like "33m 20s", byte counts) can widen it without
+   * forking the stylesheet. Default fits ~5 digits. */
+  display: grid;
+  grid-template-columns: var(--charts-y-gutter, 52px) 1fr;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.charts-y-axis {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+/* The scale holds the tick labels and is sized to the SVG (flex:1).
+ * The ::after spacer is the x-axis strip (22px height + 4px margin in
+ * `.charts-x-axis` — keep in sync) so the scale's 0%..100% lines up
+ * with the plot's top edge and baseline. */
+.charts-y-axis-scale {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+}
+.charts-y-axis::after {
+  content: "";
+  display: block;
+  flex: 0 0 26px;
+}
+.charts-y-tick {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  color: var(--charts-fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.charts-plot-area {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* min-* both zero — without these the flex algorithm refuses to
+   * shrink the SVG below its intrinsic 800x280 box and we end up
+   * overflowing the parent row in either axis. */
+  min-width: 0;
+  min-height: 0;
+}
+.charts-svg {
+  /* Explicit basis of 0 + min-height: 0 lets the flex algorithm size
+   * the SVG strictly to its track. Without `min-height: 0` an SVG
+   * with a viewBox falls back to its intrinsic aspect-ratio height
+   * and bleeds out of the plot area. `overflow: visible` lets hover
+   * dots near the bottom render as full circles instead of being
+   * clipped against the X axis — the sizing rule above is what
+   * actually keeps the bleed honest, not clipping. */
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  display: block;
+  overflow: visible;
+}
+.charts-x-axis {
+  position: relative;
+  height: 22px;
+  margin-top: 4px;
+}
+.charts-x-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--charts-fg-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---------- gridlines ---------- */
+
+.charts-grid-line {
+  stroke: var(--charts-grid-color);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ---------- series + animations ---------- */
+
+/*
+ * Animation strategy: SVG `d` attributes can't be CSS-interpolated,
+ * so we don't try to morph paths on data change. Instead each
+ * series group `scaleY` animates from 0→1 against the chart's
+ * bottom, giving the "rise from baseline" reveal that reads as a
+ * polished intro (and replays on the next data change because the
+ * group's key signature, derived from the data, shifts under it).
+ *
+ * Honor `prefers-reduced-motion`: skip the transform animation,
+ * keep the opacity fade so the chart still appears smoothly.
+ */
+@keyframes charts-series-rise {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+@keyframes charts-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.charts-series-paths {
+  transform-origin: 0 100%;
+  animation: charts-series-rise 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Stagger the second series slightly so they feel layered rather
+ * than rising in lockstep. Generalize to per-series if we ever ship
+ * more than ~3 series. */
+.charts-series-paths:nth-child(2) { animation-delay: 80ms; }
+.charts-series-paths:nth-child(3) { animation-delay: 160ms; }
+
+.charts-y-axis,
+.charts-x-axis,
+.charts-grid {
+  animation: charts-fade-in 500ms ease-out both;
+  animation-delay: 100ms;
+}
+.charts-legend {
+  animation: charts-fade-in 400ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .charts-series-paths,
+  .charts-y-axis,
+  .charts-x-axis,
+  .charts-grid,
+  .charts-legend {
+    animation: none;
+  }
+}
+
+.charts-area {
+  /* fill via the <linearGradient id="charts-grad-<color>"> ref */
+  stroke: none;
+  opacity: 1;
+  /* Phase B will toggle opacity on hover; transition primes the
+   * change to be smooth. */
+  transition: opacity 180ms ease-out;
+}
+.charts-line {
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  fill: none;
+  transition: stroke-width 180ms ease-out;
+}
+
+/* ---------- crosshair + hover dots (Phase B) ---------- */
+
+/* Crosshairs live in this HTML overlay (not as SVG lines) so WebKit's
+ * SVG stacking quirk can't paint a spike's filled area over them. Bounds
+ * match the dots overlay (and the SVG) so `left:%` maps 1:1. Sits below
+ * the dots overlay in document order → line under dot, above everything
+ * else. */
+.charts-crosshair-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  /* X-axis is `height: 22px; margin-top: 4px` — keep in sync. */
+  bottom: 26px;
+  pointer-events: none;
+}
+.charts-crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--charts-fg-faint);
+  opacity: 0.85;
+}
+/* Pinned crosshair (set by a click): heavier + more opaque so the
+ * parked reference reads as distinct from the live cursor. */
+.charts-crosshair-pinned {
+  border-left-width: 1.5px;
+  border-left-color: var(--charts-fg-muted);
+  opacity: 0.95;
+}
+/* Hover dots live as HTML divs in this overlay rather than as SVG
+ * circles. The SVG above uses `preserveAspectRatio="none"` to stretch
+ * paths across whatever container width it gets — that stretching
+ * turned circles into ovals. Rendering dots in HTML/pixel space keeps
+ * them round regardless of the chart's aspect ratio. The overlay sits
+ * over the plot region only (offset above the x-axis) so percent
+ * positions map 1:1 to the SVG viewBox underneath. */
+.charts-dots-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  /* X-axis is `height: 22px; margin-top: 4px` — keep in sync if those
+   * change. */
+  bottom: 26px;
+  pointer-events: none;
+}
+.charts-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+.charts-dot.charts-series-opened {
+  background: var(--charts-series-opened);
+}
+.charts-dot.charts-series-closed {
+  background: var(--charts-series-closed);
+}
+
+/* ---------- tooltip card (Phase B) ----------
+ * Translucent, rounded, soft shadow. Content is consumer-provided via
+ * the `tooltip` prop closure; the crate provides the chrome only. */
+.charts-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 5;
+  min-width: 200px;
+  padding: 10px 12px;
+  background: rgba(20, 22, 28, 0.92);
+  color: rgb(229 231 235);
+  border-radius: 10px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  line-height: 1.5;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: charts-fade-in 140ms ease-out both;
+}
+@media (prefers-color-scheme: light) {
+  .charts-tooltip {
+    background: rgba(255, 255, 255, 0.96);
+    color: rgb(17 24 39);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+  }
+}
+/* Pinned tooltip (parked by a click, shown on every synced chart at the
+ * pinned instant). Thin accent ring distinguishes it from the live one,
+ * and `min-width` is relaxed since several can be on screen at once. */
+.charts-tooltip-pinned {
+  border: 1px solid var(--charts-fg-faint);
+  min-width: 0;
+  animation: none;
+}
+
+/* Default tooltip row styling (consumer markup uses these classes
+ * via the bundled `tooltip_for` example or their own card). */
+.charts-tooltip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.charts-tooltip-date {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: inherit;
+}
+.charts-tooltip-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px;
+}
+.charts-tooltip-row.sub {
+  padding-left: 16px;
+  opacity: 0.75;
+  font-size: 11px;
+}
+.charts-tooltip-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.charts-tooltip-dot.charts-series-opened {
+  color: var(--charts-series-opened);
+}
+.charts-tooltip-dot.charts-series-closed {
+  color: var(--charts-series-closed);
+}
+.charts-tooltip-label {
+  color: inherit;
+}
+.charts-tooltip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* Per-series color hooks. Add a CSS rule per series in the consumer
+ * app for any color_class beyond the bundled defaults. */
+.charts-line.charts-series-opened {
+  stroke: var(--charts-series-opened);
+}
+.charts-line.charts-series-closed {
+  stroke: var(--charts-series-closed);
+}
+.charts-legend-item:has(.charts-series-opened) .charts-legend-dot {
+  color: var(--charts-series-opened);
+}
+.charts-legend-item:has(.charts-series-closed) .charts-legend-dot {
+  color: var(--charts-series-closed);
+}
+
+/* Gradient stops — referenced by <stop> inside <linearGradient>. */
+.charts-gradient.charts-series-opened .charts-gradient-top {
+  stop-color: var(--charts-series-opened-soft);
+  stop-opacity: 0.85;
+}
+.charts-gradient.charts-series-opened .charts-gradient-bottom {
+  stop-color: var(--charts-series-opened-soft);
+  stop-opacity: 0.05;
+}
+.charts-gradient.charts-series-closed .charts-gradient-top {
+  stop-color: var(--charts-series-closed-soft);
+  stop-opacity: 0.85;
+}
+.charts-gradient.charts-series-closed .charts-gradient-bottom {
+  stop-color: var(--charts-series-closed-soft);
+  stop-opacity: 0.05;
+}
+
+/* ---------- Phase C: drag-to-zoom band + reset pill ---------- */
+
+/* Semi-transparent rectangle drawn while the user drags a selection
+ * across the plot. Drawn in SVG viewBox units so it stretches with
+ * the chart; `pointer-events: none` keeps the drag itself live on the
+ * underlying plot area instead of being intercepted by the band. */
+.charts-zoom-band {
+  fill: rgba(66, 98, 255, 0.12);
+  stroke: rgba(66, 98, 255, 0.55);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+@media (prefers-color-scheme: dark) {
+  .charts-zoom-band {
+    fill: rgba(120, 150, 255, 0.18);
+    stroke: rgba(120, 150, 255, 0.7);
+  }
+}
+
+/* Reset-zoom pill — absolute-positioned top-right of the plot area.
+ * Only mounted when a zoom is active. Mirrors the tooltip card's
+ * translucent visual language. */
+.charts-zoom-reset {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--charts-fg);
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.charts-zoom-reset:hover {
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 0 2px 6px rgba(17, 24, 39, 0.1);
+}
+.charts-zoom-reset:focus-visible {
+  outline: 2px solid var(--charts-series-opened);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .charts-zoom-reset {
+    background: rgba(31, 41, 55, 0.85);
+    border-color: rgba(229, 231, 235, 0.18);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  }
+  .charts-zoom-reset:hover {
+    background: rgba(31, 41, 55, 1);
+  }
+}
