@@ -50,6 +50,7 @@ impl From<String> for JobId {
 /// enum encoding they prefer; this is the canonical Rust-side value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum JobStatus {
     Pending,
     InProgress,
@@ -295,6 +296,7 @@ impl EnqueueRequest {
 /// Result of an enqueue: either a new row was inserted or an
 /// existing active row was reused (dedupe).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum EnqueueOutcome {
     Enqueued(JobId),
     Deduped(JobId),
@@ -326,6 +328,7 @@ impl EnqueueOutcome {
 /// retry policy into the right variant here, so the backend doesn't
 /// have to know about retry budgets or backoff curves.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FinalizeOutcome {
     /// Status → done, `completed_at` = now.
     Done,
@@ -554,6 +557,7 @@ pub struct TimelineEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TimelineEventType {
     /// A new row was inserted into the queue.
     Enqueued,

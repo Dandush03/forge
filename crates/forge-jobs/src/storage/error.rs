@@ -8,6 +8,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum StorageError {
     #[error("schema migration failed at version {version}: {message}")]
     Migration { version: u32, message: String },

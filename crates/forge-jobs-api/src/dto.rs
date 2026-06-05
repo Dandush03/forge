@@ -8,11 +8,12 @@
 //! `tauri-plugin-queue`.
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use forge_jobs::{ProcessRecord, QueueConfigRow, QueueCounts};
+use serde::{Deserialize, Serialize};
 
 /// One queue's snapshot for the Mission Control overview card.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct QueueOverviewDto {
     pub name: String,
     pub paused: bool,
@@ -31,6 +32,7 @@ pub struct QueueOverviewDto {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct StatusCountsDto {
     pub pending: u64,
     pub scheduled: u64,
@@ -54,6 +56,7 @@ impl From<QueueCounts> for StatusCountsDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct QueueProcessDto {
     pub process_id: String,
     pub queue_name: String,
@@ -113,6 +116,7 @@ pub struct SetBackoffRequest {
 /// `GET /storage/info` response — surfaces the backend's
 /// `describe()` output. Useful for ops checks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct StorageInfoDto {
     pub backend: String,
     pub fields: Vec<(String, String)>,

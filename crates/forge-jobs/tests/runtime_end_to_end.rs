@@ -17,12 +17,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
-use serde_json::json;
 use forge_jobs::storage::sqlite::SqliteStorage;
 use forge_jobs::storage::{EnqueueRequest, JobStatus, TimelineEventType};
 use forge_jobs::{
     DefaultRouter, HandlerRegistry, NOOP_ECHO_KIND, NoopEcho, QueueRuntime, Storage as JobStorage,
 };
+use serde_json::json;
 
 #[tokio::test]
 async fn runtime_runs_one_noop_echo_job_to_done() {

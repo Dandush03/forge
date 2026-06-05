@@ -13,6 +13,10 @@
 /// For small mini-charts (≤ 180px tall) use [`nice_y_ticks_capped`]
 /// with a lower `max_ticks` so labels don't stack vertically.
 #[must_use]
+#[allow(
+    dead_code,
+    reason = "default-ticks shorthand wrapping `nice_y_ticks_capped(_, 6)`; kept for callers that want the legacy default and for the doc cross-link from the `capped` variant"
+)]
 pub fn nice_y_ticks(max: f64) -> Vec<f64> {
     nice_y_ticks_capped(max, 6)
 }

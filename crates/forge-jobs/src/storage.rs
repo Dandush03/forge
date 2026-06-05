@@ -71,6 +71,7 @@ pub(crate) const ERROR_HISTORY_CAP: usize = 32;
 /// / pool sizes; a future `PostgresStorage` would report
 /// `server_version` / `max_connections` / listen-channel prefix; etc.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct StorageInfo {
     /// Stable adapter identifier — `"sqlite"`, `"postgres"`, `"redis"`, …
     pub backend: String,
@@ -497,6 +498,7 @@ pub trait CronStorage: Send + Sync + std::fmt::Debug {
 
 /// Outcome of a single [`RateLimitStorage::acquire`] call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RateLimitOutcome {
     /// The acquire consumed a token; handler should proceed with
     /// the upstream call.
@@ -544,7 +546,13 @@ pub trait RateLimitStorage: Send + Sync + std::fmt::Debug {
 /// Aggregates the five trait Arcs so the runtime can be constructed
 /// from a single value. A backend that implements all five traits on
 /// one type can build this via `Storage::from_one(Arc::new(impl))`.
+///
+/// `#[non_exhaustive]` so a sixth trait concern (e.g. a future
+/// `MetricsStorage`) can land without bumping the major version.
+/// External consumers construct via `from_one`; internal code (this
+/// crate) still accesses the fields directly.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Storage {
     pub jobs: Arc<dyn JobQueue>,
     pub procs: Arc<dyn ProcessRegistry>,

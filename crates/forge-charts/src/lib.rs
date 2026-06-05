@@ -70,13 +70,26 @@
 //! - **Future**: Bar / Line variants, smooth Bezier curves, stacked
 //!   areas. Extract shared math when the second chart needs it.
 
-pub mod axis;
-pub mod chart;
-pub mod hover;
-pub mod path;
-pub mod scale;
-pub mod series;
-pub mod zoom;
+// All modules are internal implementation detail; the public surface
+// is the re-exports below. `pub(crate)` so the crate's SemVer surface
+// is the named items, not the module layout. The `unreachable_pub`
+// allow keeps the inner `pub fn` / `pub struct` markers as
+// module-local API documentation rather than forcing every item to
+// be `pub(crate)`.
+#[allow(unreachable_pub)]
+pub(crate) mod axis;
+#[allow(unreachable_pub)]
+pub(crate) mod chart;
+#[allow(unreachable_pub)]
+pub(crate) mod hover;
+#[allow(unreachable_pub)]
+pub(crate) mod path;
+#[allow(unreachable_pub)]
+pub(crate) mod scale;
+#[allow(unreachable_pub)]
+pub(crate) mod series;
+#[allow(unreachable_pub)]
+pub(crate) mod zoom;
 
 pub use chart::{AreaChart, TooltipSlot, YFormat, ZoomCommit};
 pub use hover::HoverState;

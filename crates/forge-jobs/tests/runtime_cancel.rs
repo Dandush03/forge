@@ -21,13 +21,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde_json::json;
 use forge_jobs::storage::sqlite::SqliteStorage;
 use forge_jobs::storage::{EnqueueRequest, JobStatus};
 use forge_jobs::{
     DefaultRouter, HandlerRegistry, JobCtx, JobHandler, JobOutcome, QueueRuntime,
     Storage as JobStorage,
 };
+use serde_json::json;
 
 const SLEEPY_KIND: &str = "test_sleepy";
 

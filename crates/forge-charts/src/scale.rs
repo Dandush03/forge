@@ -18,6 +18,10 @@ pub fn value_to_y(value: f64, max: f64, height: f64) -> f64 {
 /// crosshair Y back to a data-space value. Provided for completeness
 /// — v0.1 doesn't use it yet but Phases B/C will.
 #[must_use]
+#[allow(
+    dead_code,
+    reason = "inverse of value_to_y; kept as the named pair for Phases B/C consumers that will project crosshair-Y back to data space"
+)]
 pub fn y_to_value(y: f64, max: f64, height: f64) -> f64 {
     let safe_max = if max > 0.0 { max } else { 1.0 };
     let safe_height = if height > 0.0 { height } else { 1.0 };

@@ -12,17 +12,21 @@
     clippy::panic,
     reason = "integration tests crash loudly on setup/assert failures; that's the point"
 )]
+#![allow(
+    clippy::manual_let_else,
+    reason = "match-on-EnqueueOutcome with a wildcard arm is the SemVer-safe shape for a `#[non_exhaustive]` enum; `let...else` would lose the named happy-path variant"
+)]
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use serde_json::json;
 use forge_jobs::storage::sqlite::SqliteStorage;
 use forge_jobs::storage::{
     CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue, JobStatus,
     NewCronSchedule, ProcessRegistry, QueueConfig,
 };
+use serde_json::json;
 
 async fn fresh() -> Arc<SqliteStorage> {
     Arc::new(
@@ -39,7 +43,7 @@ async fn enqueue_then_claim_returns_the_row() {
     let outcome = s.enqueue(req).await.unwrap();
     let id = match outcome {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => panic!("first enqueue can't dedupe"),
+        _ => unreachable!(),
     };
 
     let claimed = s.claim_next("gh", "w-0").await.unwrap().expect("claim");
@@ -89,7 +93,7 @@ async fn finalize_done_marks_completed() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
@@ -107,7 +111,7 @@ async fn finalize_throttled_bumps_scheduled_at_and_un_attempts() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
@@ -137,7 +141,7 @@ async fn queue_cooldown_gate_blocks_siblings_then_clears_on_success() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let b = match s
         .enqueue(EnqueueRequest::new("k", json!({})).on_queue("gh"))
@@ -145,7 +149,7 @@ async fn queue_cooldown_gate_blocks_siblings_then_clears_on_success() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     // Claim + throttle A with the queue cool-down engaged.
@@ -195,7 +199,7 @@ async fn queue_cooldown_clears_after_window_elapses() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let b = match s
         .enqueue(EnqueueRequest::new("k", json!({})).on_queue("gh"))
@@ -203,7 +207,7 @@ async fn queue_cooldown_clears_after_window_elapses() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     // A zero-length cool-down → throttled_until is "now", i.e. already
@@ -242,7 +246,7 @@ async fn finalize_failed_appends_error_history() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
@@ -279,7 +283,7 @@ async fn requeue_batch_skips_dedupe_conflicts_instead_of_aborting() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     store.claim_next("gh", "w-0").await.unwrap().unwrap();
     store
@@ -304,7 +308,7 @@ async fn requeue_batch_skips_dedupe_conflicts_instead_of_aborting() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     store.claim_next("gh", "w-0").await.unwrap().unwrap();
     store
@@ -331,7 +335,7 @@ async fn requeue_batch_skips_dedupe_conflicts_instead_of_aborting() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     // Retry all failed jobs: `conflicting` clashes with `active` on "kb" →
@@ -381,7 +385,7 @@ async fn claim_next_skips_failed_when_dedupe_sibling_is_active() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     store.claim_next("gh", "w-0").await.unwrap().unwrap();
     store
@@ -407,7 +411,7 @@ async fn claim_next_skips_failed_when_dedupe_sibling_is_active() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     let claimed = store
@@ -443,7 +447,7 @@ async fn cleanup_superseded_retries_marks_redundant_failed_dead() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     store.claim_next("gh", "w-0").await.unwrap().unwrap();
     store
@@ -468,7 +472,7 @@ async fn cleanup_superseded_retries_marks_redundant_failed_dead() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     store.claim_next("gh", "w-0").await.unwrap().unwrap();
     store
@@ -492,7 +496,7 @@ async fn cleanup_superseded_retries_marks_redundant_failed_dead() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     let swept = store.cleanup_superseded_retries().await.unwrap();
@@ -529,7 +533,7 @@ async fn finalize_dead_marks_terminal() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
@@ -603,7 +607,7 @@ async fn completed_latencies_reports_done_jobs() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
@@ -733,7 +737,7 @@ async fn metrics_roll_once_aggregates_completed_job() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
@@ -892,7 +896,7 @@ async fn retry_cycle_emits_balanced_events() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
@@ -955,7 +959,7 @@ async fn delete_cascades_to_queue_event_rows() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
@@ -996,7 +1000,7 @@ async fn delete_batch_by_status_processes_in_chunks() {
         let req = EnqueueRequest::new("k", json!({ "i": i })).on_queue("gh");
         let id = match s.enqueue(req).await.unwrap() {
             EnqueueOutcome::Enqueued(id) => id,
-            EnqueueOutcome::Deduped(_) => unreachable!(),
+            _ => unreachable!(),
         };
         let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
         if i < 5 {
@@ -1112,7 +1116,7 @@ async fn list_scheduled_after_returns_future_pending_ordered() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _id_5m = match s
         .enqueue(
@@ -1124,7 +1128,7 @@ async fn list_scheduled_after_returns_future_pending_ordered() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _id_1m = match s
         .enqueue(
@@ -1136,7 +1140,7 @@ async fn list_scheduled_after_returns_future_pending_ordered() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     let rows = s
@@ -1175,7 +1179,7 @@ async fn run_now_advances_pending_scheduled_at() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     // Pre: not yet eligible.
@@ -1198,7 +1202,7 @@ async fn run_now_no_op_on_non_pending() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     // Now status = in_progress.
@@ -1224,7 +1228,7 @@ async fn claim_next_is_fifo_within_priority_and_scheduled_at() {
             .unwrap()
         {
             EnqueueOutcome::Enqueued(id) => id,
-            EnqueueOutcome::Deduped(_) => unreachable!(),
+            _ => unreachable!(),
         };
         enq_ids.push(id);
     }
@@ -1251,7 +1255,7 @@ async fn delete_in_progress_sets_cancel_flag_and_keeps_row() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
 
@@ -1278,7 +1282,7 @@ async fn delete_pending_still_removes_row() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
 
     assert!(s.delete(&id).await.unwrap());
@@ -1301,7 +1305,7 @@ async fn claim_next_clears_stale_cancel_flag_from_previous_attempt() {
         .unwrap()
     {
         EnqueueOutcome::Enqueued(id) => id,
-        EnqueueOutcome::Deduped(_) => unreachable!(),
+        _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     assert!(s.delete(&id).await.unwrap()); // sets cancel flag
