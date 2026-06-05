@@ -119,9 +119,9 @@ pub(super) async fn metrics_loop(storage: Storage, host_id: String, shutdown: Ca
     }
 }
 
-/// Roll the last [`ROLL_LOOKBACK_BUCKETS`] closed minutes into
-/// `metric_bucket`. Returns the number of rows upserted. Exposed so
-/// tests and ops tooling can trigger a roll directly.
+/// Roll the last 3 closed minutes into `metric_bucket`. Returns the
+/// number of rows upserted. Exposed so tests and ops tooling can
+/// trigger a roll directly.
 ///
 /// # Errors
 ///

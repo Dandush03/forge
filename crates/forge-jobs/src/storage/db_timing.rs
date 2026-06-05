@@ -54,8 +54,8 @@ pub struct DbRecorder {
     dropped_since_drain: AtomicU64,
 }
 
-/// Drained snapshot of a recorder, split by kind. Returned by
-/// [`DbRecorder::drain`] so the caller can write two rollup rows in
+/// Drained snapshot of a recorder, split by kind. Returned when the
+/// recorder is drained so the caller can write two rollup rows in
 /// one round-trip.
 ///
 /// `dropped` is the number of samples discarded between the previous

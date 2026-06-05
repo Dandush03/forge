@@ -13,11 +13,11 @@
 //! ## Protocol (line-delimited JSON, one request → one response)
 //!
 //! The pool writes one request line to a child's stdin:
-//! ```ignore
+//! ```text
 //! {"id":"<job-id>","payload":{...}}\n
 //! ```
 //! and reads exactly one response line from its stdout:
-//! ```ignore
+//! ```text
 //! {"id":"<job-id>","status":"ok"}
 //! {"id":"<job-id>","status":"error","message":"..."}
 //! {"id":"<job-id>","status":"throttled","retry_after_secs":30}
@@ -78,7 +78,7 @@ pub struct WorkerPoolConfig {
     pub cwd: Option<String>,
     /// Number of warm child processes. Set to the queue's worker count.
     pub size: usize,
-    /// Per-job response timeout. `None` → [`DEFAULT_TIMEOUT_SECS`].
+    /// Per-job response timeout. `None` → 600 seconds.
     pub timeout_secs: Option<u64>,
 }
 
