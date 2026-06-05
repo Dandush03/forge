@@ -32,21 +32,31 @@ impl RateLimitStorage for SqliteStorage {
         // precision — without `'subsec'` the elapsed math truncates
         // to whole seconds and a 50/min curve (0.833/sec) never
         // refills between sub-second acquires.
+        //
+        // `MAX(0.0, …)` on the elapsed delta mirrors the Postgres
+        // adapter's `GREATEST(0, …)` — clamps backward clock motion
+        // (NTP slew, laptop suspend/resume, host VM resume) so a
+        // negative delta can't subtract from `tokens`. Without the
+        // clamp a sleeping laptop returning would see tokens drop
+        // below 1.0 and acquires would stick until elapsed turned
+        // positive again.
         let row = sqlx::query(
             r"UPDATE rate_limit_state
                  SET tokens = MIN(
                        CAST(capacity AS REAL),
                        tokens
-                         + (unixepoch(?1, 'subsec')
-                            - unixepoch(last_refilled_at, 'subsec')) * refill_per_sec
+                         + MAX(0.0,
+                             unixepoch(?1, 'subsec')
+                               - unixepoch(last_refilled_at, 'subsec')) * refill_per_sec
                      ) - 1.0,
                      last_refilled_at = ?1
                WHERE scope = ?2
                  AND MIN(
                        CAST(capacity AS REAL),
                        tokens
-                         + (unixepoch(?1, 'subsec')
-                            - unixepoch(last_refilled_at, 'subsec')) * refill_per_sec
+                         + MAX(0.0,
+                             unixepoch(?1, 'subsec')
+                               - unixepoch(last_refilled_at, 'subsec')) * refill_per_sec
                      ) >= 1.0
                RETURNING tokens",
         )
