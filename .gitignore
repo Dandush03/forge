@@ -1,0 +1,12 @@
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE / editor scratch
+/.vscode/
+/.idea/
+*.swp
+*~
+
+# Cargo publish artifacts
+/target/

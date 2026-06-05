@@ -1,0 +1,26 @@
+[package]
+name = "forge-jobs-ui"
+version = "0.1.0"
+edition = "2024"
+# Keep `publish = false` while the crate lives inside the tech-admin
+# workspace. When extracted to a standalone repo, flip this and fill
+# in `repository` with the new URL.
+publish = false
+description = "Reusable Mission Control panel for the forge-jobs queue. Leptos CSR components + stylesheet + consumer-implemented IPC trait so the panel ships cleanly to Tauri / web / any other host."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dandush03/tech-admin"
+keywords = ["leptos", "queue", "jobs", "mission-control", "wasm"]
+categories = ["web-programming", "wasm", "asynchronous"]
+
+[dependencies]
+leptos        = { version = "0.8", features = ["csr"] }
+chrono        = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+async-trait   = { workspace = true }
+wasm-bindgen  = "0.2"
+web-sys       = { version = "0.3", features = ["Window", "Navigator"] }
+forge-charts = { path = "../forge-charts" }
+
+[lints]
+workspace = true

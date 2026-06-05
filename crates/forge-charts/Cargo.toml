@@ -1,0 +1,21 @@
+[package]
+name = "forge-charts"
+version = "0.1.0"
+edition = "2024"
+description = "Pure-Rust + SVG interactive charts for Leptos CSR. Project-agnostic public API; no JS, no canvas, no Tailwind."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dandush03/forge-charts"
+readme = "README.md"
+keywords = ["leptos", "chart", "svg", "wasm", "visualization"]
+categories = ["visualization", "web-programming", "wasm"]
+publish = true
+
+[dependencies]
+leptos        = { version = "0.8", features = ["csr"] }
+chrono        = { workspace = true }
+serde         = { workspace = true }
+wasm-bindgen  = "0.2"
+web-sys       = { version = "0.3", features = ["DomRect", "Element", "MouseEvent"] }
+
+[lints]
+workspace = true

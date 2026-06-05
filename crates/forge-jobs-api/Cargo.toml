@@ -1,0 +1,61 @@
+[package]
+name = "forge-jobs-api"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Why this crate exists:
+#
+# The Mission Control panel + every other queue control surface used
+# to call into the Tauri host directly via `tauri-plugin-queue`'s
+# `invoke()` commands. That's fine for the desktop Tauri build but
+# blocks any deploy shape that isn't "the same OS process holds both
+# the UI and the queue" — service deploys, cluster deploys, embedding
+# the UI in Rails, etc.
+#
+# This crate is the HTTP analog of those commands:
+#  - `jobs-api::handlers` — pure async functions taking `&Storage` +
+#    args, returning Result<Dto, Error>. The single source of truth.
+#  - `jobs-api::dto` — request/response shapes. Moved out of
+#    `tauri-plugin-queue` so both the Tauri plugin and HTTP layer
+#    speak the same types.
+#  - `jobs-api::router` — Axum router that exposes each handler as a
+#    JSON endpoint.
+#  - `bin/jobs-server.rs` — standalone binary that opens storage
+#    (env-selected SQLite or Postgres) and serves the router.
+#
+# The Tauri plugin will refactor to thin wrappers around these handlers
+# in a follow-up commit; this first commit lands the scaffold + one
+# end-to-end handler so `curl localhost:8787/health` and
+# `curl localhost:8787/queue/overview` both work against a real SQLite
+# storage instance.
+
+[dependencies]
+async-trait = { workspace = true }
+chrono      = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+axum        = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query", "matched-path"] }
+tower       = "0.5"
+tower-http  = { version = "0.6", features = ["trace", "cors"] }
+tracing-subscriber = { workspace = true }
+
+forge-jobs = { path = "../forge-jobs" }
+
+[features]
+default = []
+# Pulls in the Postgres adapter under the hood so `jobs-server` can
+# select between SQLite and Postgres at runtime via `QUEUE_BACKEND`.
+# When off, the binary only supports SQLite — the typical local
+# dev / Tauri dogfood shape.
+postgres = ["forge-jobs/postgres"]
+
+[[bin]]
+name = "jobs-server"
+path = "src/bin/jobs-server.rs"
+
+[lints]
+workspace = true
