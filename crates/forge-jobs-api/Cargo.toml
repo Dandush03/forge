@@ -2,7 +2,13 @@
 name = "forge-jobs-api"
 version = "0.1.0"
 edition = "2024"
-publish = false
+description = "Axum HTTP transport for forge-jobs. Pure async handlers over the storage trait surface (shared with in-process IPC bindings) + JSON DTOs + a reference jobs-server binary."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dandush03/forge"
+readme = "README.md"
+keywords = ["queue", "jobs", "axum", "http", "sidekiq"]
+categories = ["asynchronous", "web-programming::http-server", "database"]
+publish = true
 
 # Why this crate exists:
 #
@@ -40,10 +46,10 @@ tokio       = { workspace = true }
 tracing     = { workspace = true }
 axum        = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query", "matched-path"] }
 tower       = "0.5"
-tower-http  = { version = "0.6", features = ["trace", "cors"] }
+tower-http  = { version = "0.6", features = ["trace"] }
 tracing-subscriber = { workspace = true }
 
-forge-jobs = { path = "../forge-jobs" }
+forge-jobs = { path = "../forge-jobs", version = "0.1" }
 
 [features]
 default = []
