@@ -1,9 +1,0 @@
-/home/dlaloush/rust/forge-charts/target/wasm32-unknown-unknown/debug/deps/leptos_hot_reload-1ec2dec00aedb5ed.d: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/diff.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/node.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/parsing.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/patch.js
-
-/home/dlaloush/rust/forge-charts/target/wasm32-unknown-unknown/debug/deps/libleptos_hot_reload-1ec2dec00aedb5ed.rmeta: /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/lib.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/diff.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/node.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/parsing.rs /home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/patch.js
-
-/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/lib.rs:
-/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/diff.rs:
-/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/node.rs:
-/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/parsing.rs:
-/home/dlaloush/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/leptos_hot_reload-0.8.6/src/patch.js:
