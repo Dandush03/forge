@@ -842,25 +842,32 @@ async fn heartbeat_loop(
 ) {
     let mut tick = tokio::time::interval(HEARTBEAT_INTERVAL);
     tick.tick().await;
+    // Latches `true` the first time we observe the DB cancel flag
+    // so we don't re-fire `job_cancel.cancel()` and re-log on every
+    // subsequent tick. Cancellation is idempotent, but a handler
+    // that takes 30s to unwind would otherwise log "cancel
+    // requested" three times.
+    let mut cancel_signalled = false;
     loop {
         tokio::select! {
             biased;
             () = stop.cancelled() => return,
             _ = tick.tick() => {
                 match storage.jobs.heartbeat_job(&job_id, &process_id).await {
-                    Ok(true) => {
-                        // Cancel was requested via DB flag (delete on
-                        // an in_progress row). Signal the handler;
-                        // keep ticking so the row's heartbeat_at
-                        // stays fresh while the handler unwinds.
+                    Ok(true) if !cancel_signalled => {
+                        // First observation of the DB cancel flag.
+                        // Signal the handler; keep ticking so the
+                        // row's heartbeat_at stays fresh while the
+                        // handler unwinds.
                         tracing::info!(
                             job_id = %job_id.as_str(),
                             %process_id,
                             "heartbeat: cancel requested; signalling handler"
                         );
                         job_cancel.cancel();
+                        cancel_signalled = true;
                     }
-                    Ok(false) => {}
+                    Ok(_) => {}
                     Err(e) => tracing::warn!(?e, %process_id, "heartbeat: job update failed"),
                 }
                 if let Err(e) = storage.procs.heartbeat(&process_id, Some(job_id.clone())).await {
