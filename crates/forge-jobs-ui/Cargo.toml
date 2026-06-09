@@ -21,6 +21,16 @@ async-trait   = { workspace = true }
 wasm-bindgen  = "0.2"
 web-sys       = { version = "0.3", features = ["Window", "Navigator"] }
 forge-charts = { path = "../forge-charts", version = "0.1" }
+# `http` feature only: a ready-made HTTP `QueueIpc` (browser / webview
+# `fetch`) that talks to a `forge-jobs-api` server. Off by default so
+# the base panel stays transport-agnostic.
+gloo-net      = { version = "0.6", optional = true, default-features = false, features = ["http", "json"] }
+
+[features]
+# Bundles `HttpQueueIpc` — a drop-in `QueueIpc` over HTTP for hosts that
+# serve the panel from a `forge-jobs-api` server (the web case; Tauri can
+# reuse it too, pointed at the same server).
+http = ["dep:gloo-net"]
 
 [lints]
 workspace = true

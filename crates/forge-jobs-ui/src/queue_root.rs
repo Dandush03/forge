@@ -123,6 +123,10 @@ pub fn QueueRoot() -> impl IntoView {
     let refresh_tick = RwSignal::new(0_u32);
     provide_context(RefreshTick(refresh_tick));
     provide_context(PollIntervalMs(poll_ms));
+    // Destructive actions (purge, large bulk deletes) confirm through an
+    // in-DOM modal rather than `window.confirm()`, which the Tauri
+    // webview silently no-ops. Provided here so every tab shares it.
+    provide_context(crate::confirm::Confirmer::new());
 
     // Cache the IPC handle at component mount, where the Leptos owner
     // scope is present. `use_context` inside a setInterval callback
@@ -311,6 +315,7 @@ pub fn QueueRoot() -> impl IntoView {
             </div>
 
             <Inspector selected=selected on_change=on_change />
+            <crate::confirm::ConfirmModal />
         </div>
     }
 }

@@ -13,6 +13,7 @@ use leptos::leptos_dom::helpers::set_interval_with_handle;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::confirm::Confirmer;
 use crate::ipc::{IpcCtx, JobRow, JobsFilter};
 use crate::queue_root::RefreshTick;
 
@@ -153,28 +154,24 @@ pub fn FailedPanel(
     // button on the Jobs tab, but scoped to whichever status this
     // panel is rendering (`failed` for Retries, `dead` for Dead).
     let on_purge = move |_| {
-        let confirmed = leptos::web_sys::window()
-            .and_then(|w| {
-                w.confirm_with_message(&format!(
-                    "Delete every job in `{}` status?\n\n\
-                     This cannot be undone.",
-                    mode.status(),
-                ))
-                .ok()
-            })
-            .unwrap_or(false);
-        if !confirmed {
-            return;
-        }
         let ipc = expect_context::<IpcCtx>();
         let status = mode.status();
-        spawn_local(async move {
-            // Retries / Dead panels are queue-agnostic — purge across all.
-            match ipc.jobs_delete_by_status(status, None).await {
-                Ok(_) => on_change.run(()),
-                Err(e) => load_err.set(Some(e.to_string())),
-            }
+        let message = format!(
+            "Delete every job in `{status}` status?\n\n\
+             This cannot be undone.",
+        );
+        // In-DOM confirm — native `confirm()` no-ops in the Tauri webview.
+        let on_confirm = Callback::new(move |()| {
+            let ipc = ipc.clone();
+            spawn_local(async move {
+                // Retries / Dead panels are queue-agnostic — purge across all.
+                match ipc.jobs_delete_by_status(status, None).await {
+                    Ok(_) => on_change.run(()),
+                    Err(e) => load_err.set(Some(e.to_string())),
+                }
+            });
         });
+        expect_context::<Confirmer>().ask(message, format!("Purge {status}"), on_confirm);
     };
 
     let section_class = mode.css_modifier();
