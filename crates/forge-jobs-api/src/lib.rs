@@ -28,6 +28,8 @@ pub(crate) mod error;
 pub(crate) mod metrics;
 #[allow(unreachable_pub)]
 pub(crate) mod router;
+#[allow(unreachable_pub)]
+pub(crate) mod series;
 
 pub use error::Error;
 pub use metrics::render as metrics_render;
