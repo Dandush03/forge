@@ -155,14 +155,12 @@ pub fn QueueRoot() -> impl IntoView {
 
     refresh();
 
-    // Reactive timer: re-creates the interval whenever the user picks
-    // a new cadence. The previous handle is cleared first so the two
-    // never overlap. `0` disables the auto-poll entirely.
+    // (Re)install the poll timer for `ms`. Always clears the prior
+    // handle first so the two never overlap; `0` disables auto-poll.
     let interval_slot =
         StoredValue::new(Option::<leptos::leptos_dom::helpers::IntervalHandle>::None);
     let refresh_for_timer = refresh.clone();
-    Effect::new(move |_| {
-        let ms = poll_ms.get();
+    let install_timer = move |ms: u64| {
         let refresh = refresh_for_timer.clone();
         interval_slot.update_value(|slot| {
             if let Some(prev) = slot.take() {
@@ -175,6 +173,26 @@ pub fn QueueRoot() -> impl IntoView {
                 *slot = Some(h);
             }
         });
+    };
+
+    // Establish the initial poller synchronously at mount. Relying on
+    // the Effect's first run to do this is the bug it once was: that run
+    // is deferred to after render, and here it's the *only* thing that
+    // creates the timer — so auto-refresh never started until a cadence
+    // change forced the Effect to re-run. Mirror timeline.rs: direct
+    // setup now, Effect for changes only.
+    install_timer(poll_ms.get_untracked());
+
+    // Re-install whenever the operator picks a new cadence. The first
+    // pass (`prev == None`) only registers the `poll_ms` dependency; the
+    // mount-time `install_timer` above already owns the initial timer,
+    // so skipping it here avoids installing a duplicate.
+    let install_for_effect = install_timer.clone();
+    Effect::new(move |prev: Option<()>| {
+        let ms = poll_ms.get();
+        if prev.is_some() {
+            install_for_effect(ms);
+        }
     });
     on_cleanup(move || {
         interval_slot.update_value(|slot| {
