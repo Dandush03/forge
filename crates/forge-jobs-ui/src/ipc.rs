@@ -445,7 +445,7 @@ pub trait QueueIpc: Send + Sync + 'static {
         offset: u32,
     ) -> Result<JobsPage, IpcError>;
     async fn jobs_failed(&self, limit: u32) -> Result<Vec<JobRow>, IpcError>;
-    async fn jobs_kinds(&self) -> Result<Vec<String>, IpcError>;
+    async fn jobs_kinds(&self, queue_name: Option<&str>) -> Result<Vec<String>, IpcError>;
     async fn job_inspect(&self, id: &str) -> Result<JobInspect, IpcError>;
 
     // ── mutations
@@ -489,10 +489,19 @@ pub trait QueueIpc: Send + Sync + 'static {
     async fn jobs_retry_all_by_status(&self, status: &str) -> Result<u64, IpcError>;
     async fn jobs_delete(&self, ids: &[String]) -> Result<u64, IpcError>;
     async fn jobs_requeue(&self, ids: &[String]) -> Result<u64, IpcError>;
-    async fn jobs_delete_done_older_than(&self, days: u32) -> Result<u64, IpcError>;
-    /// Delete every job currently in `status` (`done` / `failed` / `dead`).
+    async fn jobs_delete_done_older_than(
+        &self,
+        days: u32,
+        queue_name: Option<&str>,
+    ) -> Result<u64, IpcError>;
+    /// Delete every job currently in `status` (`done` / `failed` / `dead`),
+    /// optionally scoped to one `queue_name` (`None` = all queues).
     /// Backs the per-tab Purge buttons. Returns the row count deleted.
-    async fn jobs_delete_by_status(&self, status: &str) -> Result<u64, IpcError>;
+    async fn jobs_delete_by_status(
+        &self,
+        status: &str,
+        queue_name: Option<&str>,
+    ) -> Result<u64, IpcError>;
 
     // ── cron schedules
     async fn cron_list(&self) -> Result<Vec<CronSchedule>, IpcError>;

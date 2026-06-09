@@ -387,16 +387,27 @@ pub struct IdsRequest {
     pub ids: Vec<String>,
 }
 
-/// Request body for the by-status ops (`retry-all` / `delete`).
+/// Request body for `retry-all-by-status` (queue-wide; no scope).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StatusRequest {
     pub status: String,
 }
 
-/// Request body for `POST /jobs/delete-done-older-than`.
+/// Request body for `POST /jobs/delete-by-status` — optional queue scope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteByStatusRequest {
+    pub status: String,
+    #[serde(default)]
+    pub queue_name: Option<String>,
+}
+
+/// Request body for `POST /jobs/delete-done-older-than` — optional
+/// queue scope (`None` = every queue).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteDoneOlderThanRequest {
     pub days: u32,
+    #[serde(default)]
+    pub queue_name: Option<String>,
 }
 
 /// Request body for `POST /cron/{name}/enabled`.
@@ -440,6 +451,13 @@ pub struct EnqueueDemoRequest {
 /// Query for `GET /queue/processes`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ProcessesQuery {
+    #[serde(default)]
+    pub queue_name: Option<String>,
+}
+
+/// Query for `GET /jobs/kinds` — optional queue scope.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct KindsQuery {
     #[serde(default)]
     pub queue_name: Option<String>,
 }

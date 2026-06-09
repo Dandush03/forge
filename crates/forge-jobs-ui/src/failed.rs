@@ -169,7 +169,8 @@ pub fn FailedPanel(
         let ipc = expect_context::<IpcCtx>();
         let status = mode.status();
         spawn_local(async move {
-            match ipc.jobs_delete_by_status(status).await {
+            // Retries / Dead panels are queue-agnostic — purge across all.
+            match ipc.jobs_delete_by_status(status, None).await {
                 Ok(_) => on_change.run(()),
                 Err(e) => load_err.set(Some(e.to_string())),
             }

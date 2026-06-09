@@ -559,12 +559,17 @@ impl JobQueue for SqliteStorage {
         Ok(res.rows_affected())
     }
 
-    async fn distinct_kinds(&self) -> Result<Vec<String>> {
+    async fn distinct_kinds(&self, queue: Option<&str>) -> Result<Vec<String>> {
         let _t = OpTimer::read(&self.db_recorder);
-        let rows = sqlx::query("SELECT DISTINCT kind FROM sync_queue ORDER BY kind ASC")
-            .fetch_all(&self.read_pool)
-            .await
-            .map_err(map_sqlx_err)?;
+        let rows = sqlx::query(
+            r"SELECT DISTINCT kind FROM sync_queue
+               WHERE (?1 IS NULL OR queue_name = ?1)
+               ORDER BY kind ASC",
+        )
+        .bind(queue)
+        .fetch_all(&self.read_pool)
+        .await
+        .map_err(map_sqlx_err)?;
         rows.into_iter()
             .map(|r| r.try_get::<String, _>("kind").map_err(map_sqlx_err))
             .collect()

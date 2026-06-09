@@ -180,9 +180,11 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
     /// excluded: they're deferred, not lagging.
     async fn oldest_ready_at(&self, queue: &str) -> Result<Option<DateTime<Utc>>>;
 
-    /// Distinct kinds currently in the queue. Used by Mission
-    /// Control's filter dropdown.
-    async fn distinct_kinds(&self) -> Result<Vec<String>>;
+    /// Distinct kinds currently in the queue, optionally scoped to a
+    /// single `queue` (`None` = across all queues). Used by Mission
+    /// Control's filter dropdown — scoping it lets selecting a queue
+    /// narrow the kind options to that queue's jobs.
+    async fn distinct_kinds(&self, queue: Option<&str>) -> Result<Vec<String>>;
 
     /// Append-only event log events in `[from, to)`. Used by
     /// Mission Control's timeline chart, which buckets in Rust.

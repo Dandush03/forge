@@ -143,18 +143,27 @@ pub fn JobTable(
         }
     });
 
-    // Populate filter dropdowns once.
+    // Queue dropdown: fetch the queue list once.
     {
         let ipc = expect_context::<IpcCtx>();
         spawn_local(async move {
-            if let Ok(ks) = ipc.jobs_kinds().await {
-                kinds.set(ks);
-            }
             if let Ok(qs) = ipc.queue_overview().await {
                 queues.set(qs.into_iter().map(|q| q.name).collect());
             }
         });
     }
+    // Kinds dropdown: re-fetch scoped to the selected queue, so picking
+    // a queue narrows the kind options to that queue's jobs (empty
+    // filter → kinds across all queues). Reactive on `queue_filter`.
+    Effect::new(move |_| {
+        let scoped = queue_filter.with(|q| (!q.is_empty()).then(|| q.clone()));
+        let ipc = expect_context::<IpcCtx>();
+        spawn_local(async move {
+            if let Ok(ks) = ipc.jobs_kinds(scoped.as_deref()).await {
+                kinds.set(ks);
+            }
+        });
+    });
     let bar = BulkActionsBar {
         selection,
         on_done: Callback::new(move |()| {
@@ -192,22 +201,32 @@ pub fn JobTable(
     // every pending row.
     let on_purge = move |_| {
         let status = status_filter.get_untracked();
+        // Scope the purge to the selected queue when one is picked, so
+        // "Purge" respects the queue filter instead of nuking every
+        // queue. Empty filter → all queues (the original behaviour).
+        let queue = queue_filter.get_untracked();
+        let scope = (!queue.is_empty()).then(|| queue.clone());
+        let where_clause = scope.as_deref().map_or_else(
+            || "across every queue".to_owned(),
+            |q| format!("in queue `{q}`"),
+        );
         let (label, message) = if status.is_empty() {
             (
                 "done".to_owned(),
-                "Delete every job with status `done`?\n\n\
-                 This bypasses the per-queue retention window.\n\
-                 `failed` and `dead` rows are not touched."
-                    .to_owned(),
+                format!(
+                    "Delete every job with status `done` {where_clause}?\n\n\
+                     This bypasses the per-queue retention window.\n\
+                     `failed` and `dead` rows are not touched."
+                ),
             )
         } else {
             let pretty = pretty_status(&status).to_lowercase();
             (
-                pretty.clone(),
+                pretty,
                 format!(
-                    "Delete every job with status `{status}`?\n\n\
-                     This affects ALL `{pretty}` rows across every \
-                     queue — not just the rows visible on screen."
+                    "Delete every job with status `{status}` {where_clause}?\n\n\
+                     This affects all matching rows {where_clause}, not just \
+                     the rows visible on screen."
                 ),
             )
         };
@@ -220,10 +239,11 @@ pub fn JobTable(
         let ipc = expect_context::<IpcCtx>();
         let tick = use_context::<RefreshTick>();
         spawn_local(async move {
+            let scoped = scope.as_deref();
             let result = if status.is_empty() {
-                ipc.jobs_delete_done_older_than(0).await
+                ipc.jobs_delete_done_older_than(0, scoped).await
             } else {
-                ipc.jobs_delete_by_status(&status).await
+                ipc.jobs_delete_by_status(&status, scoped).await
             };
             match result {
                 Ok(_) => {
@@ -263,11 +283,16 @@ pub fn JobTable(
                 >
                     { move || {
                         let s = status_filter.get();
-                        if s.is_empty() {
-                            "Purge done".to_owned()
+                        let what = if s.is_empty() {
+                            "done".to_owned()
                         } else {
-                            format!("Purge {}", pretty_status(&s).to_lowercase())
-                        }
+                            pretty_status(&s).to_lowercase()
+                        };
+                        queue_filter.with(|q| if q.is_empty() {
+                            format!("Purge {what}")
+                        } else {
+                            format!("Purge {what} in {q}")
+                        })
                     } }
                 </button>
             </header>

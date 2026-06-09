@@ -239,12 +239,9 @@ pub async fn jobs_failed(storage: &Storage, limit: u32) -> Result<Vec<JobRowDto>
 }
 
 /// `GET /jobs/kinds` — distinct job kinds across the queue (drives the
-/// filter dropdown).
-//
-// TODO(forge): scope to a queue once `JobQueue::distinct_kinds` grows
-// an `Option<&str>` arg — see the per-queue kinds-filter bug fix.
-pub async fn jobs_kinds(storage: &Storage) -> Result<Vec<String>, Error> {
-    Ok(storage.jobs.distinct_kinds().await?)
+/// filter dropdown), optionally scoped to one `queue_name`.
+pub async fn jobs_kinds(storage: &Storage, queue_name: Option<&str>) -> Result<Vec<String>, Error> {
+    Ok(storage.jobs.distinct_kinds(queue_name).await?)
 }
 
 /// `GET /jobs/{id}` — full row + decoded payload + error history.
@@ -331,27 +328,45 @@ pub async fn jobs_delete(storage: &Storage, ids: &[String]) -> Result<u64, Error
 
 /// `POST /jobs/delete-done-older-than` — purge `done` rows older than
 /// `days`, across every queue.
-pub async fn jobs_delete_done_older_than(storage: &Storage, days: u32) -> Result<u64, Error> {
+pub async fn jobs_delete_done_older_than(
+    storage: &Storage,
+    days: u32,
+    queue_name: Option<&str>,
+) -> Result<u64, Error> {
     let threshold = Utc::now() - chrono::Duration::days(i64::from(days));
-    let queues = storage.config.list_queues().await?;
+    // Scope to one queue when asked; otherwise sweep every queue.
+    let queues: Vec<String> = match queue_name {
+        Some(q) => vec![q.to_owned()],
+        None => storage
+            .config
+            .list_queues()
+            .await?
+            .into_iter()
+            .map(|q| q.name)
+            .collect(),
+    };
     let mut total = 0u64;
     for q in queues {
         total += storage
             .jobs
-            .cleanup_aged(&q.name, JobStatus::Done, threshold)
+            .cleanup_aged(&q, JobStatus::Done, threshold)
             .await?;
     }
     Ok(total)
 }
 
 /// `POST /jobs/delete-by-status` — bulk-purge every row in `status`.
-pub async fn jobs_delete_by_status(storage: &Storage, status: &str) -> Result<u64, Error> {
+pub async fn jobs_delete_by_status(
+    storage: &Storage,
+    status: &str,
+    queue_name: Option<&str>,
+) -> Result<u64, Error> {
     let status = parse_status(status)?;
     let mut total = 0u64;
     loop {
         let n = storage
             .jobs
-            .delete_batch_by_status(None, status, BULK_BATCH)
+            .delete_batch_by_status(queue_name, status, BULK_BATCH)
             .await?;
         total += n;
         if n < BULK_BATCH as u64 {

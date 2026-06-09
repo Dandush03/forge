@@ -226,8 +226,13 @@ async fn jobs_failed_route(
     handlers::jobs_failed(&storage, q.limit).await.map(Json)
 }
 
-async fn jobs_kinds_route(State(storage): State<Arc<Storage>>) -> Result<Json<Vec<String>>, Error> {
-    handlers::jobs_kinds(&storage).await.map(Json)
+async fn jobs_kinds_route(
+    State(storage): State<Arc<Storage>>,
+    Query(q): Query<dto::KindsQuery>,
+) -> Result<Json<Vec<String>>, Error> {
+    handlers::jobs_kinds(&storage, q.queue_name.as_deref())
+        .await
+        .map(Json)
 }
 
 async fn jobs_scheduled_route(
@@ -311,16 +316,16 @@ async fn jobs_delete_done_older_than_route(
     State(storage): State<Arc<Storage>>,
     Json(body): Json<dto::DeleteDoneOlderThanRequest>,
 ) -> Result<Json<u64>, Error> {
-    handlers::jobs_delete_done_older_than(&storage, body.days)
+    handlers::jobs_delete_done_older_than(&storage, body.days, body.queue_name.as_deref())
         .await
         .map(Json)
 }
 
 async fn jobs_delete_by_status_route(
     State(storage): State<Arc<Storage>>,
-    Json(body): Json<dto::StatusRequest>,
+    Json(body): Json<dto::DeleteByStatusRequest>,
 ) -> Result<Json<u64>, Error> {
-    handlers::jobs_delete_by_status(&storage, &body.status)
+    handlers::jobs_delete_by_status(&storage, &body.status, body.queue_name.as_deref())
         .await
         .map(Json)
 }
