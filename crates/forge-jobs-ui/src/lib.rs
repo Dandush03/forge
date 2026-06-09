@@ -50,10 +50,18 @@
 // API documentation rather than forcing every item to be `pub(crate)`.
 pub mod ipc;
 
+// Optional HTTP `QueueIpc` impl (browser / webview `fetch` → a
+// `forge-jobs-api` server). Behind the `http` feature so the base panel
+// stays transport-agnostic.
+#[cfg(feature = "http")]
+mod http;
+
 #[allow(unreachable_pub)]
 pub(crate) mod bulk_actions;
 #[allow(unreachable_pub)]
 pub(crate) mod chart_fmt;
+#[allow(unreachable_pub)]
+pub(crate) mod confirm;
 #[allow(unreachable_pub)]
 pub(crate) mod cron;
 #[allow(unreachable_pub)]
@@ -84,6 +92,9 @@ pub use ipc::{
     TimelineBucket,
 };
 pub use queue_root::QueueRoot;
+
+#[cfg(feature = "http")]
+pub use http::HttpQueueIpc;
 
 /// Default stylesheet bundled with the crate. Inject once at the app
 /// root via Leptos `<Stylesheet text=PANEL_CSS />`.

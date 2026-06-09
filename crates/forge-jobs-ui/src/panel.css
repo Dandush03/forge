@@ -658,6 +658,62 @@
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* ── Queue: confirmation modal ───────────────────────────────── */
+/* In-DOM replacement for native confirm()/prompt(), which no-op in the
+   Tauri webview. */
+.queue-confirm-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 30, 0.45);
+  z-index: 60;
+}
+.queue-confirm {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: 90vw;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--shadow-md);
+  padding: 18px 18px 14px;
+  z-index: 61;
+}
+.queue-confirm-msg {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-line;
+  color: var(--fg);
+}
+.queue-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.queue-confirm-cancel,
+.queue-confirm-go {
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 13px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.queue-confirm-cancel {
+  background: var(--bg);
+  color: var(--fg-muted);
+}
+.queue-confirm-cancel:hover { border-color: var(--accent); color: var(--accent); }
+.queue-confirm-go {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.queue-confirm-go:hover { filter: brightness(1.08); }
 .queue-jobs-filters {
   display: flex;
   flex-wrap: wrap;

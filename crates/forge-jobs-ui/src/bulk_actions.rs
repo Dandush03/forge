@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::confirm::Confirmer;
 use crate::ipc::IpcCtx;
 use crate::queue_root::RefreshTick;
 
@@ -71,13 +72,6 @@ impl BulkAction {
         }
     }
 
-    pub const fn confirm_word(self) -> &'static str {
-        match self {
-            Self::Retry => "retry",
-            Self::Delete => "delete",
-            Self::Requeue => "requeue",
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -93,43 +87,54 @@ impl BulkActionsBar {
             return;
         }
 
-        if ids.len() > CONFIRM_THRESHOLD {
-            let prompt = format!(
-                "About to {verb} {n} jobs. Type '{word}' to confirm:",
-                verb = action.verb().to_lowercase(),
-                n = ids.len(),
-                word = action.confirm_word(),
-            );
-            let typed = leptos::web_sys::window()
-                .and_then(|w| w.prompt_with_message(&prompt).ok())
-                .flatten()
-                .unwrap_or_default();
-            if typed.trim() != action.confirm_word() {
-                return;
-            }
-        }
-
         let selection = self.selection;
         let on_done = self.on_done;
         let ipc = expect_context::<IpcCtx>();
         let tick = use_context::<RefreshTick>();
-        spawn_local(async move {
-            let result = match action {
-                BulkAction::Retry => ipc.jobs_retry(&ids).await,
-                BulkAction::Delete => ipc.jobs_delete(&ids).await,
-                BulkAction::Requeue => ipc.jobs_requeue(&ids).await,
-            };
-            if let Err(e) = result {
-                leptos::web_sys::console::warn_1(
-                    &format!("bulk {verb} failed: {e}", verb = action.verb()).into(),
-                );
-                return;
-            }
-            selection.clear();
-            if let Some(RefreshTick(tick)) = tick {
-                tick.update(|n| *n = n.wrapping_add(1));
-            }
-            on_done.run(());
-        });
+        let n = ids.len();
+        // `Fn`, not `FnOnce`: it's either invoked directly below or
+        // handed to a `Callback` (re-runnable), so clone the captures
+        // inside before moving them into the async task.
+        let execute = move || {
+            let ids = ids.clone();
+            let ipc = ipc.clone();
+            spawn_local(async move {
+                let result = match action {
+                    BulkAction::Retry => ipc.jobs_retry(&ids).await,
+                    BulkAction::Delete => ipc.jobs_delete(&ids).await,
+                    BulkAction::Requeue => ipc.jobs_requeue(&ids).await,
+                };
+                if let Err(e) = result {
+                    leptos::web_sys::console::warn_1(
+                        &format!("bulk {verb} failed: {e}", verb = action.verb()).into(),
+                    );
+                    return;
+                }
+                selection.clear();
+                if let Some(RefreshTick(tick)) = tick {
+                    tick.update(|n| *n = n.wrapping_add(1));
+                }
+                on_done.run(());
+            });
+        };
+
+        if n > CONFIRM_THRESHOLD {
+            // Above the bulk threshold, confirm first. (Was a typed
+            // `window.prompt()` — silently unavailable in the Tauri
+            // webview, so the action just dropped.) The in-DOM modal
+            // works in both browser and webview.
+            let message = format!(
+                "About to {verb} {n} jobs.\n\nThis affects all selected \
+                 rows, not just the ones visible.",
+                verb = action.verb().to_lowercase(),
+            );
+            expect_context::<Confirmer>().ask(
+                message,
+                action.verb().to_owned(),
+                Callback::new(move |()| execute()),
+            );
+        } else {
+            execute();
+        }
     }
 }

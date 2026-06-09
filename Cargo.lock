@@ -799,6 +799,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "forge-charts",
+ "gloo-net",
  "leptos",
  "serde",
  "serde_json",

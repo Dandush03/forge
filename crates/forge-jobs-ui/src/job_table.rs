@@ -8,6 +8,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::bulk_actions::{BulkAction, BulkActionsBar, SelectionState};
+use crate::confirm::Confirmer;
 use crate::ipc::{IpcCtx, JOB_STATUSES, JobsFilter, JobsPage};
 use crate::queue_root::{PollIntervalMs, RefreshTick};
 
@@ -230,35 +231,45 @@ pub fn JobTable(
                 ),
             )
         };
-        let confirmed = leptos::web_sys::window()
-            .and_then(|w| w.confirm_with_message(&message).ok())
-            .unwrap_or(false);
-        if !confirmed {
-            return;
-        }
         let ipc = expect_context::<IpcCtx>();
         let tick = use_context::<RefreshTick>();
-        spawn_local(async move {
-            let scoped = scope.as_deref();
-            let result = if status.is_empty() {
-                ipc.jobs_delete_done_older_than(0, scoped).await
-            } else {
-                ipc.jobs_delete_by_status(&status, scoped).await
-            };
-            match result {
-                Ok(_) => {
-                    // Local refresh will happen via the periodic poll
-                    // or by bumping the tick (which our refresh-on-tick
-                    // Effect subscribes to).
-                    if let Some(RefreshTick(t)) = tick {
-                        t.update(|n| *n = n.wrapping_add(1));
+        // Confirm in-DOM (native `confirm()` is a silent no-op in the
+        // Tauri webview); the delete runs only if the operator confirms.
+        let confirm_label = if scope.is_some() {
+            format!("Purge {label} here")
+        } else {
+            format!("Purge {label}")
+        };
+        let on_confirm = Callback::new(move |()| {
+            let ipc = ipc.clone();
+            let status = status.clone();
+            let scope = scope.clone();
+            let label = label.clone();
+            spawn_local(async move {
+                let scoped = scope.as_deref();
+                let result = if status.is_empty() {
+                    ipc.jobs_delete_done_older_than(0, scoped).await
+                } else {
+                    ipc.jobs_delete_by_status(&status, scoped).await
+                };
+                match result {
+                    Ok(_) => {
+                        // Local refresh will happen via the periodic poll
+                        // or by bumping the tick (which our refresh-on-tick
+                        // Effect subscribes to).
+                        if let Some(RefreshTick(t)) = tick {
+                            t.update(|n| *n = n.wrapping_add(1));
+                        }
+                    }
+                    Err(e) => {
+                        leptos::web_sys::console::warn_1(
+                            &format!("purge {label} failed: {e}").into(),
+                        );
                     }
                 }
-                Err(e) => {
-                    leptos::web_sys::console::warn_1(&format!("purge {label} failed: {e}").into());
-                }
-            }
+            });
         });
+        expect_context::<Confirmer>().ask(message, confirm_label, on_confirm);
     };
 
     view! {
