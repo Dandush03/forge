@@ -1881,12 +1881,15 @@ where
 }
 
 /// Clear the queue-wide throttle cool-down after a job succeeds — but
-/// only once the window has elapsed (`throttled_until <= now`). A
-/// success from a job that was already in-flight when the limit hit
-/// doesn't prove the window passed, so clearing on it would reopen the
-/// gate into the still-active limit. Clearing only past the deadline is
-/// also the counter's decay. No-op on the un-throttled hot path.
-/// Mirrors the `SQLite` adapter.
+/// only once the window elapsed **and stayed quiet** for the throttle
+/// decay grace (`throttled_until <= now - grace`). A success from a job
+/// that was already in-flight when the limit hit doesn't prove the
+/// window passed, so clearing on it would reopen the gate into the
+/// still-active limit. The grace is also the exponent's decay: clearing
+/// at the bare deadline let a single success in the gap before the
+/// limiter flapped back reset the curve to `base`, so a flapping limiter
+/// never escalated. No-op on the un-throttled hot path. Mirrors the
+/// `SQLite` adapter.
 async fn clear_queue_cooldown<'e, E>(
     executor: E,
     queue_name: &str,
@@ -1895,6 +1898,7 @@ async fn clear_queue_cooldown<'e, E>(
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
+    let decay_before = now - chrono::Duration::seconds(crate::runtime::THROTTLE_DECAY_GRACE_SECS);
     sqlx::query(
         r"UPDATE queue
              SET throttle_attempts = 0,
@@ -1902,10 +1906,11 @@ where
                  updated_at        = $1
            WHERE name = $2
              AND throttle_attempts > 0
-             AND (throttled_until IS NULL OR throttled_until <= $1)",
+             AND (throttled_until IS NULL OR throttled_until <= $3)",
     )
     .bind(now)
     .bind(queue_name)
+    .bind(decay_before)
     .execute(executor)
     .await
     .map_err(map_sqlx_err)?;

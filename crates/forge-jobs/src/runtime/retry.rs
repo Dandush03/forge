@@ -10,6 +10,24 @@ use std::time::Duration;
 /// the per-queue backoff config landed.
 pub(super) const FALLBACK_THROTTLE_SECS: u64 = 60;
 
+/// Grace period before a post-window success decays the throttle
+/// exponent back to zero.
+///
+/// The cool-down *gate* reopens at `throttled_until` (throughput
+/// resumes immediately), but the exponent only resets once the limiter
+/// has stayed quiet for this long *past* the last window. Without it, a
+/// single success in the gap between a window ending and the limiter
+/// flapping back to 429 resets the curve to `base` — so a flapping
+/// limiter never escalates, it just oscillates at `base`. In short:
+/// "did we throttle in the last couple of minutes?" — if so, keep the
+/// exponent.
+// `pub(crate)` (re-exported via `runtime`) so the storage adapters can
+// reach it from their `clear_queue_cooldown`. Same rationale as
+// `failed_delay` below — `pub(super)` only reaches `runtime`, and `pub`
+// would leak it as public API.
+#[allow(clippy::redundant_pub_crate, reason = "see comment above")]
+pub(crate) const THROTTLE_DECAY_GRACE_SECS: i64 = 120;
+
 /// Per-queue throttle delay curve. Used by `map_outcome` for the
 /// `JobOutcome::Throttled` arm. When `enabled = false`, returns a
 /// flat [`FALLBACK_THROTTLE_SECS`] regardless of `throttle_attempts`

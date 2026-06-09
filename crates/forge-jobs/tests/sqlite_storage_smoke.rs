@@ -190,7 +190,14 @@ async fn queue_cooldown_gate_blocks_siblings_then_clears_on_success() {
 }
 
 #[tokio::test]
-async fn queue_cooldown_clears_after_window_elapses() {
+async fn queue_cooldown_counter_survives_success_within_decay_grace() {
+    // Regression: a success that lands *just after* a window elapsed but
+    // still within the decay grace must NOT reset the throttle exponent.
+    // Otherwise a flapping limiter (429 → one success → 429) oscillates
+    // at `base` instead of escalating, because the lone success between
+    // windows keeps zeroing the counter. The gate still reopens (the
+    // deadline is in the past), so throughput isn't blocked — only the
+    // exponent's decay waits for the limiter to stay quiet.
     let s = fresh().await;
     s.ensure_queue("gh", 1).await.unwrap();
     let a = match s
@@ -210,8 +217,8 @@ async fn queue_cooldown_clears_after_window_elapses() {
         _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    // A zero-length cool-down → throttled_until is "now", i.e. already
-    // elapsed by the time the next finalize runs.
+    // Zero-length cool-down → the window is already elapsed by the next
+    // finalize, but it elapsed *just now* — well inside the decay grace.
     s.finalize(
         &a,
         FinalizeOutcome::Throttled {
@@ -224,16 +231,19 @@ async fn queue_cooldown_clears_after_window_elapses() {
     let cfg = s.get_queue("gh").await.unwrap().unwrap();
     assert_eq!(cfg.throttle_attempts, 1, "first throttle bumps the counter");
 
-    // A success once the window has elapsed resets the curve.
+    // A success inside the decay grace does NOT reset the exponent.
     s.finalize(&b, FinalizeOutcome::Done).await.unwrap();
     let cfg = s.get_queue("gh").await.unwrap().unwrap();
     assert_eq!(
-        cfg.throttle_attempts, 0,
-        "counter resets after the window passes"
+        cfg.throttle_attempts, 1,
+        "exponent survives a success within the decay grace (no premature reset)"
     );
+
+    // ...but the gate has reopened (deadline is in the past), so a
+    // re-claim succeeds — only the counter's decay waits, not throughput.
     assert!(
-        cfg.throttled_until.is_none(),
-        "deadline cleared after the window"
+        s.claim_next("gh", "w-0").await.unwrap().is_some(),
+        "elapsed window reopens the gate even though the exponent is retained"
     );
 }
 

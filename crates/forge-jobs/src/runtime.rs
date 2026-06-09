@@ -38,7 +38,7 @@ pub use rate_limit::{
     AcquireOutcome, DEFAULT_RATE_LIMIT_SCOPES, RateLimiter, ensure_default_rate_limits,
 };
 pub use rebalance::{REBALANCE_TICK, rebalance_once};
-pub(crate) use retry::failed_delay;
+pub(crate) use retry::{THROTTLE_DECAY_GRACE_SECS, failed_delay};
 pub use routing::{DefaultRouter, KindPrefixRouter, Router};
 pub use worker_pool::{WorkerPoolConfig, WorkerPoolHandler};
 
