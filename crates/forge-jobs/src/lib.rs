@@ -142,10 +142,10 @@ pub use runtime::{
 pub use storage::PostgresStorage;
 pub use storage::{
     CronScheduleRecord, CronStorage, DrainedSamples, EnqueueOutcome, EnqueueRequest,
-    FinalizeOutcome, JobId, JobLatency, JobQueue, JobRecord, JobStatus, MetricBucket,
-    NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord, ProcessRegistry, QueueConfig,
-    QueueConfigRow, QueueCounts, RateLimitOutcome, RateLimitStorage, SqliteStorage, Storage,
-    StorageError, StorageInfo, TimelineEvent, TimelineEventType, metric,
+    FinalizeOutcome, HeartbeatStatus, JobId, JobLatency, JobQueue, JobRecord, JobStatus,
+    MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord, ProcessRegistry,
+    QueueConfig, QueueConfigRow, QueueCounts, RateLimitOutcome, RateLimitStorage, SqliteStorage,
+    Storage, StorageError, StorageInfo, TimelineEvent, TimelineEventType, metric,
 };
 
 /// Format an error with its full `Error::source()` chain as
