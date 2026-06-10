@@ -33,7 +33,13 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - forge_pg_data:/var/lib/postgresql/data
+      # PG 18+ stores data in a major-version subdirectory and expects the
+      # mount one level up at /var/lib/postgresql (mounting the old
+      # /var/lib/postgresql/data path makes the 18+ entrypoint refuse to
+      # start). This layout also lets `pg_upgrade --link` work across major
+      # bumps without the mount-boundary issue. See
+      # https://github.com/docker-library/postgres/pull/1259
+      - forge_pg_data:/var/lib/postgresql
     # `cargo test` / the server should wait for a ready DB; the healthcheck
     # lets `docker compose up --wait` block until Postgres accepts queries.
     healthcheck:
