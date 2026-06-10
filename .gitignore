@@ -15,3 +15,7 @@ crates/*/Cargo.lock
 /.idea/
 *.swp
 *~
+
+# Claude Code: share team skills, keep per-machine local settings out
+# (machine-specific paths + session permission grants).
+.claude/settings.local.json
