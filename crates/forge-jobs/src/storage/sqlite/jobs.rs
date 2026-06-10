@@ -1414,8 +1414,12 @@ async fn clear_queue_cooldown<'e, E>(executor: E, queue_name: &str, now_iso: &st
 where
     E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
 {
+    // L3: derive the decay horizon from the caller's `now` (the same
+    // instant written to `updated_at`), not a fresh `Utc::now()` read, so
+    // the comparison is from one clock domain — matching the PG adapter.
+    let now = parse_dt(now_iso)?;
     let decay_before =
-        iso(Utc::now() - chrono::Duration::seconds(crate::runtime::THROTTLE_DECAY_GRACE_SECS));
+        iso(now - chrono::Duration::seconds(crate::runtime::THROTTLE_DECAY_GRACE_SECS));
     sqlx::query(
         r"UPDATE queue
              SET throttle_attempts = 0,
