@@ -1,0 +1,9 @@
+# Rails app runtime/generated artifacts (regenerated in-container)
+solidq_app/log/
+solidq_app/tmp/
+solidq_app/storage/
+solidq_app/.bundle/
+solidq_app/vendor/
+# docker stats scratch from measure.sh
+*-stats.csv
+

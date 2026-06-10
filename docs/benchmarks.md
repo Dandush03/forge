@@ -18,7 +18,13 @@ system):
 
 ## Method
 
-- **Concurrency:** 8 workers/threads everywhere.
+- **Concurrency:** 8 logical workers everywhere — forge `LOADGEN_WORKERS=8`,
+  Sidekiq `-c 8`, solid_queue `threads: 8`. Note the runtime difference:
+  forge's 8 are async tasks on a multi-threaded tokio runtime (real
+  parallelism across cores), while the Ruby workers are 8 threads sharing
+  the GVL (true parallelism only across IO waits — which is why
+  solid_queue didn't scale past ~3 threads). Fair as "8 workers each," but
+  the parallelism model itself is part of what's being compared.
 - **Pickup latency:** a producer enqueues at 50 jobs/s (workers stay mostly
   idle, isolating wake+claim); each job carries its enqueue timestamp and
   the worker records `now − enqueued_at` when it *starts* the job.
