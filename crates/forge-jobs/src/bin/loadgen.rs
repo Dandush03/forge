@@ -178,23 +178,26 @@ async fn run_probe(
         let queue = queue.clone();
         let pid = format!("probe-{w}");
         handles.push(tokio::spawn(async move {
-            let mut hist = Hist::new();
+            let mut pickup = Hist::new();
+            let mut e2e = Hist::new();
             while !stop.load(Ordering::Relaxed) {
                 // Block until a NOTIFY wakes us (or a 1s safety timeout).
                 let _ = storage.wait_for_work(&queue, Duration::from_secs(1)).await;
                 while let Ok(Some(job)) = storage.claim_next(&queue, &pid).await {
-                    let micros = (Utc::now() - job.enqueued_at)
-                        .num_microseconds()
-                        .unwrap_or(0)
-                        .max(0) as u64;
-                    hist.record(micros);
+                    let enq = job.enqueued_at;
+                    let since = |t: chrono::DateTime<Utc>| {
+                        (Utc::now() - t).num_microseconds().unwrap_or(0).max(0) as u64
+                    };
+                    // pickup = enqueue→claim; e2e = enqueue→durably finalized.
+                    pickup.record(since(enq));
                     picked.fetch_add(1, Ordering::Relaxed);
                     let _ = storage
                         .finalize(&job.id, Some(&pid), FinalizeOutcome::Done)
                         .await;
+                    e2e.record(since(enq));
                 }
             }
-            hist
+            (pickup, e2e)
         }));
     }
 
@@ -218,23 +221,29 @@ async fn run_probe(
     stop.store(true, Ordering::Relaxed);
     let _ = producer.await;
 
-    let mut hist = Hist::new();
+    let mut pickup = Hist::new();
+    let mut e2e = Hist::new();
     for h in handles {
-        if let Ok(wh) = h.await {
-            hist.merge(&wh);
+        if let Ok((wp, we)) = h.await {
+            pickup.merge(&wp);
+            e2e.merge(&we);
         }
     }
     let _ = storage.flush_event_buffer().await;
 
     let n = picked.load(Ordering::Relaxed);
     println!("picked up {n} jobs");
-    println!(
-        "  pickup latency (enqueue→claim)  p50 {}µs   p95 {}µs   p99 {}µs   max {}µs",
-        hist.percentile(50.0),
-        hist.percentile(95.0),
-        hist.percentile(99.0),
-        hist.percentile(100.0),
-    );
+    let line = |label: &str, h: &Hist| {
+        println!(
+            "  {label}  p50 {}µs   p95 {}µs   p99 {}µs   max {}µs",
+            h.percentile(50.0),
+            h.percentile(95.0),
+            h.percentile(99.0),
+            h.percentile(100.0),
+        );
+    };
+    line("pickup latency (enqueue→claim)        ", &pickup);
+    line("end-to-end latency (enqueue→finalized)", &e2e);
     Ok(())
 }
 
