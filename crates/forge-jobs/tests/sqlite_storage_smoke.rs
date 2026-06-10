@@ -23,8 +23,8 @@ use std::time::Duration;
 use chrono::Utc;
 use forge_jobs::SqliteStorage;
 use forge_jobs::storage::{
-    CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, HeartbeatStatus, JobQueue,
-    JobStatus, NewCronSchedule, ProcessRegistry, QueueConfig,
+    CronStorage, DeleteOutcome, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, HeartbeatStatus,
+    JobQueue, JobStatus, NewCronSchedule, ProcessRegistry, QueueConfig,
 };
 use serde_json::json;
 
@@ -1103,7 +1103,7 @@ async fn delete_cascades_to_queue_event_rows() {
         .unwrap();
     assert_eq!(pre.len(), 3);
 
-    assert!(s.delete(&id).await.unwrap());
+    assert_ne!(s.delete(&id).await.unwrap(), DeleteOutcome::NotFound);
 
     let post = s
         .list_for_timeline(
@@ -1389,7 +1389,7 @@ async fn delete_in_progress_sets_cancel_flag_and_keeps_row() {
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
 
     // delete returns true but doesn't remove the row.
-    assert!(s.delete(&id).await.unwrap());
+    assert_ne!(s.delete(&id).await.unwrap(), DeleteOutcome::NotFound);
     let job = s.get_job(&id).await.unwrap().expect("row still present");
     assert_eq!(job.status, JobStatus::InProgress);
 
@@ -1415,7 +1415,7 @@ async fn delete_pending_still_removes_row() {
         _ => unreachable!(),
     };
 
-    assert!(s.delete(&id).await.unwrap());
+    assert_ne!(s.delete(&id).await.unwrap(), DeleteOutcome::NotFound);
     assert!(
         s.get_job(&id).await.unwrap().is_none(),
         "row should be gone"
@@ -1438,7 +1438,7 @@ async fn claim_next_clears_stale_cancel_flag_from_previous_attempt() {
         _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    assert!(s.delete(&id).await.unwrap()); // sets cancel flag
+    assert_ne!(s.delete(&id).await.unwrap(), DeleteOutcome::NotFound); // sets cancel flag
 
     // Worker finalizes (failed); user retries via requeue → pending.
     s.finalize(

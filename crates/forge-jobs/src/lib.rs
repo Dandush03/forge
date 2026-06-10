@@ -141,7 +141,7 @@ pub use runtime::{
 #[cfg(feature = "postgres")]
 pub use storage::PostgresStorage;
 pub use storage::{
-    CronScheduleRecord, CronStorage, DrainedSamples, EnqueueOutcome, EnqueueRequest,
+    CronScheduleRecord, CronStorage, DeleteOutcome, DrainedSamples, EnqueueOutcome, EnqueueRequest,
     FinalizeOutcome, HeartbeatStatus, JobId, JobLatency, JobQueue, JobRecord, JobStatus,
     MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord, ProcessRegistry,
     QueueConfig, QueueConfigRow, QueueCounts, RateLimitOutcome, RateLimitStorage, SqliteStorage,

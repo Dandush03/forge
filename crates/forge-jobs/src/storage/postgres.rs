@@ -58,8 +58,8 @@ use super::types::{
     QueueCounts, TimelineEvent, TimelineEventType, metric,
 };
 use super::{
-    CronStorage, ERROR_HISTORY_CAP, HeartbeatStatus, JobQueue, ProcessRegistry, QueueConfig,
-    RateLimitOutcome, RateLimitStorage, StorageInfo,
+    CronStorage, DeleteOutcome, ERROR_HISTORY_CAP, HeartbeatStatus, JobQueue, ProcessRegistry,
+    QueueConfig, RateLimitOutcome, RateLimitStorage, StorageInfo,
 };
 
 /// In-process per-queue wake registry. The single listener task signals
@@ -844,7 +844,7 @@ impl JobQueue for PostgresStorage {
             .collect()
     }
 
-    async fn delete(&self, job_id: &JobId) -> Result<bool> {
+    async fn delete(&self, job_id: &JobId) -> Result<DeleteOutcome> {
         let _t = OpTimer::write(&self.db_recorder);
         let mut tx = self.pool.begin().await.map_err(map_sqlx_err)?;
         // Cancel path: in-progress rows have their cancel flag set
@@ -865,7 +865,7 @@ impl JobQueue for PostgresStorage {
         .map_err(map_sqlx_err)?;
         if cancel_row.is_some() {
             tx.commit().await.map_err(map_sqlx_err)?;
-            return Ok(true);
+            return Ok(DeleteOutcome::CancelRequested);
         }
         sqlx::query("DELETE FROM queue_event WHERE job_id = $1")
             .bind(job_id.as_str())
@@ -878,7 +878,11 @@ impl JobQueue for PostgresStorage {
             .await
             .map_err(map_sqlx_err)?;
         tx.commit().await.map_err(map_sqlx_err)?;
-        Ok(res.rows_affected() > 0)
+        Ok(if res.rows_affected() > 0 {
+            DeleteOutcome::Deleted
+        } else {
+            DeleteOutcome::NotFound
+        })
     }
 
     async fn requeue(&self, job_id: &JobId) -> Result<bool> {
