@@ -348,4 +348,4 @@ default single-process SQLite build say so explicitly; ones marked
 | L2 | fixed | PG `delete_batch_by_status` selects victims once in a CTE (`FOR UPDATE SKIP LOCKED`); events + rows delete from the same snapshot |
 | L3 | fixed | SQLite `clear_queue_cooldown` derives `decay_before` from the passed `now_iso` (one clock domain, matches PG) |
 | L4 | fixed | `JobQueue::delete` returns `DeleteOutcome` {Deleted, CancelRequested, NotFound}; API keeps its `u64` touched-count contract |
-| L5 | **pending** | Document, or compute PG staleness horizons in SQL for one clock domain |
+| L5 | fixed | Documented the lease (DB clock) vs pod-liveness (app clock) split + the 60s `STALE_THRESHOLD` drift assumption in `docs/operating-at-scale.md` ("Clock domains"); SQL-domain unification noted there as the future option |
