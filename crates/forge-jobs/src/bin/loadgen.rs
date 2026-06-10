@@ -26,6 +26,10 @@
 //! - `LOADGEN_DURATION_SECS`: run length (default 30).
 //! - `LOADGEN_QUEUE`: queue name (default `loadgen`).
 //! - `LOADGEN_MAX_CONN`: PG pool size (default workers + feeders + 4).
+//! - `LOADGEN_PROBE`: set to `1` for probe mode — measure enqueue→pickup
+//!   latency through the `wait_for_work` (LISTEN/NOTIFY) path on a
+//!   not-saturated queue, instead of claim throughput under a backlog.
+//! - `LOADGEN_PROBE_RATE`: probe enqueue rate, jobs/s (default 50).
 //!
 //! To see how claim latency scales with table size, run it a few times
 //! with `LOADGEN_SEED=1000000`, `10000000`, … and compare the p99. The
@@ -56,6 +60,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use chrono::Utc;
 use forge_jobs::{
     EnqueueRequest, FinalizeOutcome, JobQueue, PostgresStorage, QueueConfig, QueueCounts,
 };
@@ -142,6 +147,97 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
+/// Probe mode: a slow producer enqueues at `rate`/s while idle workers
+/// block on `wait_for_work` (the LISTEN/NOTIFY path) and claim as soon as
+/// they're woken. We report the *pickup* latency — wall time from a row's
+/// `enqueued_at` to a worker claiming it — which is what NOTIFY drives down
+/// versus a queue that polls on an interval. Workers are kept mostly idle
+/// (slow producer) so this isolates wake+claim, not queue wait.
+async fn run_probe(
+    storage: Arc<PostgresStorage>,
+    queue: String,
+    workers: u64,
+    duration: Duration,
+    rate: u64,
+) -> AnyResult<()> {
+    println!("probe mode: enqueue→pickup latency via wait_for_work (NOTIFY)");
+    println!(
+        "  target rate  {rate}/s   workers {workers}   duration {}s",
+        duration.as_secs()
+    );
+    println!();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let picked = Arc::new(AtomicU64::new(0));
+
+    let mut handles = Vec::new();
+    for w in 0..workers {
+        let storage = Arc::clone(&storage);
+        let stop = Arc::clone(&stop);
+        let picked = Arc::clone(&picked);
+        let queue = queue.clone();
+        let pid = format!("probe-{w}");
+        handles.push(tokio::spawn(async move {
+            let mut hist = Hist::new();
+            while !stop.load(Ordering::Relaxed) {
+                // Block until a NOTIFY wakes us (or a 1s safety timeout).
+                let _ = storage.wait_for_work(&queue, Duration::from_secs(1)).await;
+                while let Ok(Some(job)) = storage.claim_next(&queue, &pid).await {
+                    let micros = (Utc::now() - job.enqueued_at)
+                        .num_microseconds()
+                        .unwrap_or(0)
+                        .max(0) as u64;
+                    hist.record(micros);
+                    picked.fetch_add(1, Ordering::Relaxed);
+                    let _ = storage
+                        .finalize(&job.id, Some(&pid), FinalizeOutcome::Done)
+                        .await;
+                }
+            }
+            hist
+        }));
+    }
+
+    // Producer: one enqueue every 1/rate seconds.
+    let interval = Duration::from_micros(1_000_000 / rate);
+    let prod_stop = Arc::clone(&stop);
+    let prod_storage = Arc::clone(&storage);
+    let prod_queue = queue.clone();
+    let producer = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        while !prod_stop.load(Ordering::Relaxed) {
+            tick.tick().await;
+            let _ = prod_storage
+                .enqueue(EnqueueRequest::new("loadgen", json!({})).on_queue(prod_queue.clone()))
+                .await;
+        }
+    });
+
+    tokio::time::sleep(duration).await;
+    stop.store(true, Ordering::Relaxed);
+    let _ = producer.await;
+
+    let mut hist = Hist::new();
+    for h in handles {
+        if let Ok(wh) = h.await {
+            hist.merge(&wh);
+        }
+    }
+    let _ = storage.flush_event_buffer().await;
+
+    let n = picked.load(Ordering::Relaxed);
+    println!("picked up {n} jobs");
+    println!(
+        "  pickup latency (enqueue→claim)  p50 {}µs   p95 {}µs   p99 {}µs   max {}µs",
+        hist.percentile(50.0),
+        hist.percentile(95.0),
+        hist.percentile(99.0),
+        hist.percentile(100.0),
+    );
+    Ok(())
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> AnyResult<()> {
     let url = env::var("DATABASE_URL")
@@ -167,6 +263,14 @@ async fn main() -> AnyResult<()> {
 
     let storage = Arc::new(PostgresStorage::open(&url, max_conn).await?);
     storage.ensure_queue(&queue, workers as i32).await?;
+
+    // Probe mode: measure enqueue→pickup latency through the NOTIFY wake
+    // path on a *not*-saturated queue (the metric that beats a polling
+    // queue), rather than claim throughput under a saturated backlog.
+    if env::var("LOADGEN_PROBE").is_ok_and(|v| v == "1" || v == "true") {
+        let rate = env_u64("LOADGEN_PROBE_RATE", 50).max(1);
+        return run_probe(storage, queue, workers, duration, rate).await;
+    }
 
     // ── seed ────────────────────────────────────────────────────────────
     if seed > 0 {
