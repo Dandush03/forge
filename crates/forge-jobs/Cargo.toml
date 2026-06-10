@@ -81,6 +81,26 @@ testcontainers-modules = { version = "0.11", features = ["postgres"] }
 # them visible to the test target.
 sqlx     = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 ulid     = "1"
+# Microbenchmarks for the storage hot path (benches/queue_ops.rs). Async
+# claim/enqueue/finalize are driven on a tokio runtime via the
+# `async_tokio` feature. Postgres-only, so the bench target is gated with
+# `required-features = ["postgres"]` below.
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+# `loadgen` — Postgres load / soak harness (src/bin/loadgen.rs). Gated so
+# the default (SQLite-only) build doesn't try to compile the PG-specific
+# binary. Run with `--features postgres`.
+[[bin]]
+name = "loadgen"
+required-features = ["postgres"]
+
+# Storage hot-path microbenchmarks. `harness = false` hands main() to
+# criterion; postgres-gated like the integration tests (needs a live PG
+# via DATABASE_URL / TEST_DATABASE_URL).
+[[bench]]
+name = "queue_ops"
+harness = false
+required-features = ["postgres"]
 
 [lints]
 workspace = true
