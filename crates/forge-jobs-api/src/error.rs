@@ -63,9 +63,16 @@ impl From<StorageError> for Error {
             other if other.is_transient_conflict() => Self::Conflict {
                 msg: other.to_string(),
             },
-            other => Self::Storage {
-                msg: other.to_string(),
-            },
+            // M5: don't echo raw backend error text (driver internals,
+            // connection detail, SQL fragments, file paths) to the caller
+            // in a 500 body. Keep the full string in the server log; hand
+            // the client a generic message.
+            other => {
+                tracing::error!(error = %other, "storage backend error (500)");
+                Self::Storage {
+                    msg: "storage backend error".to_owned(),
+                }
+            }
         }
     }
 }
