@@ -1,17 +1,27 @@
 //! End-to-end smoke tests for the Postgres storage adapter.
 //!
-//! Each test spins up an ephemeral `postgres:16` container via the
-//! `testcontainers`, runs the embedded migrations, and exercises one
-//! slice of the trait surface. Slow (~5-10s per test container
-//! startup) but isolated.
+//! Gated behind `--features postgres` — the default `cargo test` doesn't
+//! compile or run these. Two ways to provide a Postgres (see `bootstrap`):
 //!
-//! Gated behind `--features postgres` — the default `cargo test`
-//! doesn't compile or run these. Run with:
+//! - **testcontainers (default)** — each test starts its own ephemeral
+//!   `postgres` container. Needs a reachable Docker daemon (set
+//!   `DOCKER_HOST` for non-default sockets, e.g. colima). Isolated but
+//!   slow (~5-10s per container).
 //!
-//! ```text
-//! cargo test -p tech-admin-jobs --features postgres \
-//!   --test postgres_storage_smoke
-//! ```
+//!   ```text
+//!   cargo test -p forge-jobs --features postgres --test postgres_storage_smoke
+//!   ```
+//!
+//! - **external server (`TEST_DATABASE_URL`)** — point at a standing
+//!   Postgres (the repo's `docker-compose.yml`, or the CI service). Each
+//!   test creates and drops its own `forge_test_*` database, so parallel
+//!   tests stay isolated. Much faster (no per-test container).
+//!
+//!   ```text
+//!   docker compose up -d postgres
+//!   TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres \
+//!     cargo test -p forge-jobs --features postgres --test postgres_storage_smoke
+//!   ```
 
 #![cfg(feature = "postgres")]
 #![allow(
@@ -36,19 +46,83 @@ use forge_jobs::storage::{
     JobStatus, NewCronSchedule, ProcessRegistry, QueueConfig,
 };
 use serde_json::json;
+use sqlx::postgres::PgPoolOptions;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
+use ulid::Ulid;
 
-/// Bundle of a live container handle + the open storage backed by
-/// it. The container handle stays in scope (in the test) so the
-/// container isn't killed before the test finishes.
+/// Open storage plus whatever keeps its database alive for the test.
+///
+/// Two modes:
+/// - **Container** (default): an ephemeral `testcontainers` Postgres,
+///   isolated per test by virtue of being its own container.
+/// - **External** (`TEST_DATABASE_URL` set): a standing server (the
+///   `docker-compose` Postgres / the CI service). Each test gets its own
+///   freshly-created database so parallel tests stay isolated, dropped on
+///   completion.
+///
+/// `storage` is declared before `_guard` so it (and its connection pool +
+/// listener task) drops first, before the guard drops the database.
 struct Bootstrapped {
     storage: Arc<PostgresStorage>,
-    _container: ContainerAsync<Postgres>,
+    _guard: TestDbGuard,
+}
+
+#[allow(
+    dead_code,
+    clippy::large_enum_variant,
+    reason = "Container holds the testcontainers handle purely for its Drop (which stops the container) — never read. The size skew vs External is irrelevant for a per-test helper that constructs exactly one."
+)]
+enum TestDbGuard {
+    /// Container teardown drops the whole server with the database.
+    Container(ContainerAsync<Postgres>),
+    /// A per-test database on a shared server; dropped on completion.
+    External { admin_url: String, db: String },
+}
+
+impl Drop for TestDbGuard {
+    fn drop(&mut self) {
+        let Self::External { admin_url, db } = self else {
+            return;
+        };
+        let admin_url = admin_url.clone();
+        let db = db.clone();
+        // Drop the per-test database on a dedicated OS thread with its own
+        // runtime — we can't block on the test's runtime inside Drop, and
+        // it may already be tearing down. `WITH (FORCE)` evicts any
+        // lingering connection (e.g. the storage's listener) so the DROP
+        // can't be blocked by one. Best-effort: a leaked test DB is
+        // harmless and `docker compose down -v` resets the volume.
+        let _ = std::thread::spawn(move || {
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            rt.block_on(async move {
+                if let Ok(pool) = PgPoolOptions::new().connect(&admin_url).await {
+                    let _ = sqlx::query(&format!("DROP DATABASE IF EXISTS \"{db}\" WITH (FORCE)"))
+                        .execute(&pool)
+                        .await;
+                    pool.close().await;
+                }
+            });
+        })
+        .join();
+    }
 }
 
 async fn bootstrap() -> Bootstrapped {
+    match std::env::var("TEST_DATABASE_URL") {
+        Ok(url) if !url.trim().is_empty() => bootstrap_external(&url).await,
+        _ => bootstrap_container().await,
+    }
+}
+
+/// Ephemeral container, one per test (the default, no env needed).
+async fn bootstrap_container() -> Bootstrapped {
     let container = Postgres::default()
         .start()
         .await
@@ -65,8 +139,59 @@ async fn bootstrap() -> Bootstrapped {
     );
     Bootstrapped {
         storage,
-        _container: container,
+        _guard: TestDbGuard::Container(container),
     }
+}
+
+/// A fresh per-test database on the server `TEST_DATABASE_URL` points at
+/// (the compose / CI Postgres). Creating a database per test keeps
+/// parallel tests isolated on one shared server.
+async fn bootstrap_external(admin_url: &str) -> Bootstrapped {
+    // Unique, lowercase, valid-identifier db name. ULID is Crockford
+    // base32 (upper); lowercased + the `forge_test_` prefix → a-z0-9_
+    // starting with a letter, well under PG's 63-char identifier cap.
+    let db = format!(
+        "forge_test_{}",
+        Ulid::new().to_string().to_ascii_lowercase()
+    );
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(admin_url)
+        .await
+        .expect("connect TEST_DATABASE_URL");
+    sqlx::query(&format!("CREATE DATABASE \"{db}\""))
+        .execute(&admin)
+        .await
+        .expect("create per-test database");
+    admin.close().await;
+
+    let url = with_database(admin_url, &db);
+    let storage = Arc::new(
+        PostgresStorage::open(&url, 10)
+            .await
+            .expect("open PostgresStorage on per-test database"),
+    );
+    Bootstrapped {
+        storage,
+        _guard: TestDbGuard::External {
+            admin_url: admin_url.to_owned(),
+            db,
+        },
+    }
+}
+
+/// Swap the database name in a `postgres://…/<db>[?query]` URL.
+fn with_database(base: &str, db: &str) -> String {
+    let (pre, query) = base
+        .split_once('?')
+        .map_or((base, None), |(p, q)| (p, Some(q)));
+    let slash = pre.rfind('/').expect("postgres URL has a path slash");
+    let mut out = format!("{}/{db}", &pre[..slash]);
+    if let Some(q) = query {
+        out.push('?');
+        out.push_str(q);
+    }
+    out
 }
 
 #[tokio::test]
