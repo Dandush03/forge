@@ -668,7 +668,15 @@ async fn worker_loop(
             } => Some(*retry_after),
             _ => None,
         };
-        if let Err(e) = storage.jobs.finalize(&job_id, finalize_outcome).await {
+        // Pass our `process_id` as the ownership guard (H1): if this
+        // worker stalled past the stale threshold and the reaper revived
+        // + another worker re-claimed the row, this finalize no-ops
+        // instead of clobbering the new claimant's in-flight job.
+        if let Err(e) = storage
+            .jobs
+            .finalize(&job_id, Some(&process_id), finalize_outcome)
+            .await
+        {
             tracing::error!(?e, ?job_id, %process_id, "worker: finalize failed");
         }
 

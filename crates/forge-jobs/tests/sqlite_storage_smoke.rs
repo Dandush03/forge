@@ -85,6 +85,55 @@ async fn claim_skips_future_scheduled_jobs() {
 }
 
 #[tokio::test]
+async fn finalize_owner_guard_blocks_stale_worker_clobber() {
+    // H1: a worker (w-0) claims a job, then stalls past the stale
+    // threshold. The reaper revives it and a second worker (w-1)
+    // re-claims it. When the stalled w-0 finally finalizes with its own
+    // process_id as the ownership guard, the update must NO-OP — w-1 now
+    // owns the row, and clobbering it would let the same job run twice.
+    let s = fresh().await;
+    s.ensure_queue("gh", 1).await.unwrap();
+    let id = match s
+        .enqueue(EnqueueRequest::new("k", json!({})).on_queue("gh"))
+        .await
+        .unwrap()
+    {
+        EnqueueOutcome::Enqueued(id) => id,
+        _ => unreachable!(),
+    };
+    // w-0 claims it (now in_progress, owned by w-0).
+    let claimed = s.claim_next("gh", "w-0").await.unwrap().unwrap();
+    assert_eq!(claimed.id, id);
+    // Reaper revives it (simulate the stale heartbeat sweep), then w-1
+    // re-claims. The row is now owned by w-1, attempts incremented again.
+    let revived = s
+        .revive_stale(Utc::now() + chrono::Duration::seconds(1))
+        .await
+        .unwrap();
+    assert_eq!(revived, 1, "the stale in-flight row is revived");
+    let reclaimed = s.claim_next("gh", "w-1").await.unwrap().unwrap();
+    assert_eq!(reclaimed.id, id, "w-1 re-claims the revived row");
+    // The stalled w-0 finalizes Done with its own id as the guard — must
+    // no-op, leaving the row in_progress under w-1.
+    s.finalize(&id, Some("w-0"), FinalizeOutcome::Done)
+        .await
+        .unwrap();
+    let row = s.get_job(&id).await.unwrap().unwrap();
+    assert_eq!(
+        row.status,
+        JobStatus::InProgress,
+        "stale w-0's finalize must not move w-1's in-flight row to done"
+    );
+    assert_eq!(row.process_id.as_deref(), Some("w-1"), "still owned by w-1");
+    // w-1 (the real owner) finalizes Done — succeeds.
+    s.finalize(&id, Some("w-1"), FinalizeOutcome::Done)
+        .await
+        .unwrap();
+    let row = s.get_job(&id).await.unwrap().unwrap();
+    assert_eq!(row.status, JobStatus::Done, "the true owner finalizes");
+}
+
+#[tokio::test]
 async fn finalize_done_marks_completed() {
     let s = fresh().await;
     let id = match s
@@ -96,7 +145,7 @@ async fn finalize_done_marks_completed() {
         _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
     let row = s.get_job(&id).await.unwrap().unwrap();
     assert_eq!(row.status, JobStatus::Done);
     assert!(row.completed_at.is_some());
@@ -116,6 +165,7 @@ async fn finalize_throttled_bumps_scheduled_at_and_un_attempts() {
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
         &id,
+        None,
         FinalizeOutcome::Throttled {
             retry_after: Duration::from_secs(30),
             cool_down_queue: false,
@@ -157,6 +207,7 @@ async fn queue_cooldown_gate_blocks_siblings_then_clears_on_success() {
     assert_eq!(claimed.id, a, "FIFO hands out A first");
     s.finalize(
         &a,
+        None,
         FinalizeOutcome::Throttled {
             retry_after: Duration::from_mins(1),
             cool_down_queue: true,
@@ -177,7 +228,7 @@ async fn queue_cooldown_gate_blocks_siblings_then_clears_on_success() {
     // A success from a still-in-flight job (started before the limit hit)
     // must NOT clear an active cool-down — otherwise the gate reopens
     // straight into the live rate limit. The window must run its course.
-    s.finalize(&b, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&b, None, FinalizeOutcome::Done).await.unwrap();
     let cfg = s.get_queue("gh").await.unwrap().unwrap();
     assert_eq!(
         cfg.throttle_attempts, 1,
@@ -221,6 +272,7 @@ async fn queue_cooldown_counter_survives_success_within_decay_grace() {
     // finalize, but it elapsed *just now* — well inside the decay grace.
     s.finalize(
         &a,
+        None,
         FinalizeOutcome::Throttled {
             retry_after: Duration::from_secs(0),
             cool_down_queue: true,
@@ -232,7 +284,7 @@ async fn queue_cooldown_counter_survives_success_within_decay_grace() {
     assert_eq!(cfg.throttle_attempts, 1, "first throttle bumps the counter");
 
     // A success inside the decay grace does NOT reset the exponent.
-    s.finalize(&b, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&b, None, FinalizeOutcome::Done).await.unwrap();
     let cfg = s.get_queue("gh").await.unwrap().unwrap();
     assert_eq!(
         cfg.throttle_attempts, 1,
@@ -261,6 +313,7 @@ async fn finalize_failed_appends_error_history() {
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
         &id,
+        None,
         FinalizeOutcome::Failed {
             retry_after: Duration::from_mins(1),
             message: "boom".into(),
@@ -299,6 +352,7 @@ async fn requeue_batch_skips_dedupe_conflicts_instead_of_aborting() {
     store
         .finalize(
             &conflicting,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: Duration::from_mins(1),
                 message: "x".into(),
@@ -324,6 +378,7 @@ async fn requeue_batch_skips_dedupe_conflicts_instead_of_aborting() {
     store
         .finalize(
             &control,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: Duration::from_mins(1),
                 message: "x".into(),
@@ -401,6 +456,7 @@ async fn claim_next_skips_failed_when_dedupe_sibling_is_active() {
     store
         .finalize(
             &stuck,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: Duration::from_secs(0),
                 message: "x".into(),
@@ -463,6 +519,7 @@ async fn cleanup_superseded_retries_marks_redundant_failed_dead() {
     store
         .finalize(
             &superseded,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: Duration::from_mins(1),
                 message: "x".into(),
@@ -488,6 +545,7 @@ async fn cleanup_superseded_retries_marks_redundant_failed_dead() {
     store
         .finalize(
             &lone_failed,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: Duration::from_mins(1),
                 message: "x".into(),
@@ -548,6 +606,7 @@ async fn finalize_dead_marks_terminal() {
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
         &id,
+        None,
         FinalizeOutcome::Dead {
             message: "rip".into(),
         },
@@ -571,7 +630,7 @@ async fn count_by_status_groups_correctly() {
             .unwrap();
     }
     let claimed = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    s.finalize(&claimed.id, FinalizeOutcome::Done)
+    s.finalize(&claimed.id, None, FinalizeOutcome::Done)
         .await
         .unwrap();
 
@@ -620,7 +679,7 @@ async fn completed_latencies_reports_done_jobs() {
         _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
 
     let from = Utc::now() - chrono::Duration::seconds(60);
     let to = Utc::now() + chrono::Duration::seconds(60);
@@ -750,7 +809,7 @@ async fn metrics_roll_once_aggregates_completed_job() {
         _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
 
     // Roll with `now` two minutes ahead so the just-completed job's
     // minute bucket is closed and inside the lookback window.
@@ -911,6 +970,7 @@ async fn retry_cycle_emits_balanced_events() {
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(
         &id,
+        None,
         FinalizeOutcome::Throttled {
             retry_after: Duration::from_millis(1),
             cool_down_queue: false,
@@ -922,7 +982,7 @@ async fn retry_cycle_emits_balanced_events() {
     // very near future; nudge with a sleep so claim_next sees it.
     tokio::time::sleep(Duration::from_millis(5)).await;
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
 
     let now = Utc::now();
     let events = s
@@ -972,7 +1032,7 @@ async fn delete_cascades_to_queue_event_rows() {
         _ => unreachable!(),
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
-    s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
 
     // Pre-delete: 3 events (Enqueued, Started, Completed).
     let now = Utc::now();
@@ -1014,7 +1074,7 @@ async fn delete_batch_by_status_processes_in_chunks() {
         };
         let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
         if i < 5 {
-            s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+            s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
         }
     }
 
@@ -1075,6 +1135,7 @@ async fn requeue_batch_by_status_resets_pending() {
         let claimed = s.claim_next("gh", "w-0").await.unwrap().unwrap();
         s.finalize(
             &claimed.id,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: std::time::Duration::from_mins(1),
                 message: "boom".into(),
@@ -1217,7 +1278,7 @@ async fn run_now_no_op_on_non_pending() {
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     // Now status = in_progress.
     assert!(!s.run_now(&id).await.unwrap(), "must not touch in_progress");
-    s.finalize(&id, FinalizeOutcome::Done).await.unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
     // Now status = done.
     assert!(!s.run_now(&id).await.unwrap(), "must not touch done");
 }
@@ -1323,6 +1384,7 @@ async fn claim_next_clears_stale_cancel_flag_from_previous_attempt() {
     // Worker finalizes (failed); user retries via requeue → pending.
     s.finalize(
         &id,
+        None,
         FinalizeOutcome::Failed {
             retry_after: Duration::ZERO,
             message: "cancelled".to_owned(),

@@ -59,7 +59,7 @@ async fn run_to_terminal(
         .expect("claim_next")
         .expect("a row to claim");
     assert_eq!(claimed.id, id);
-    s.jobs.finalize(&id, outcome).await.expect("finalize");
+    s.jobs.finalize(&id, None, outcome).await.expect("finalize");
     id
 }
 

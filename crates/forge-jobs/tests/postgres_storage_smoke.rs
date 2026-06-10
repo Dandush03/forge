@@ -153,7 +153,7 @@ async fn finalize_done_marks_completed() {
     };
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
-        .finalize(&id, FinalizeOutcome::Done)
+        .finalize(&id, None, FinalizeOutcome::Done)
         .await
         .unwrap();
     let row = b.storage.get_job(&id).await.unwrap().unwrap();
@@ -177,6 +177,7 @@ async fn finalize_failed_appends_error_history() {
     b.storage
         .finalize(
             &id,
+            None,
             FinalizeOutcome::Failed {
                 retry_after: Duration::from_mins(1),
                 message: "boom".into(),
@@ -210,6 +211,7 @@ async fn retry_cycle_emits_balanced_events() {
     b.storage
         .finalize(
             &id,
+            None,
             FinalizeOutcome::Throttled {
                 retry_after: Duration::from_millis(1),
                 cool_down_queue: false,
@@ -220,7 +222,7 @@ async fn retry_cycle_emits_balanced_events() {
     tokio::time::sleep(Duration::from_millis(10)).await;
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
-        .finalize(&id, FinalizeOutcome::Done)
+        .finalize(&id, None, FinalizeOutcome::Done)
         .await
         .unwrap();
 
@@ -261,7 +263,7 @@ async fn delete_cascades_to_queue_event_rows() {
     };
     let _ = b.storage.claim_next("gh", "w-0").await.unwrap().unwrap();
     b.storage
-        .finalize(&id, FinalizeOutcome::Done)
+        .finalize(&id, None, FinalizeOutcome::Done)
         .await
         .unwrap();
 

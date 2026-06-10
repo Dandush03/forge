@@ -181,12 +181,17 @@ impl JobQueue for SqliteStorage {
         Ok(Some(job))
     }
 
-    async fn finalize(&self, job_id: &JobId, outcome: FinalizeOutcome) -> Result<()> {
+    async fn finalize(
+        &self,
+        job_id: &JobId,
+        owner: Option<&str>,
+        outcome: FinalizeOutcome,
+    ) -> Result<()> {
         let _t = OpTimer::write(&self.db_recorder);
         // Retry on transient writer-lock conflicts. See the module
         // doc for the rationale.
         crate::storage::with_transient_retry("finalize", || {
-            self.do_finalize(job_id, outcome.clone())
+            self.do_finalize(job_id, owner, outcome.clone())
         })
         .await
     }
@@ -259,6 +264,7 @@ impl JobQueue for SqliteStorage {
                     /* terminal: */ true,
                     None,
                     Some(&stale_iso),
+                    /* guard_owner: */ None,
                 )
                 .await?;
             } else {
@@ -277,6 +283,7 @@ impl JobQueue for SqliteStorage {
                     /* terminal: */ false,
                     Some(&next),
                     Some(&stale_iso),
+                    /* guard_owner: */ None,
                 )
                 .await?;
             }
@@ -942,15 +949,20 @@ impl SqliteStorage {
     /// in a retry loop so transient writer-lock conflicts (from a
     /// bulk enqueue holding the lock past `busy_timeout`) don't leave
     /// the row stuck in `in_progress`.
-    async fn do_finalize(&self, job_id: &JobId, outcome: FinalizeOutcome) -> Result<()> {
+    async fn do_finalize(
+        &self,
+        job_id: &JobId,
+        owner: Option<&str>,
+        outcome: FinalizeOutcome,
+    ) -> Result<()> {
         let now = iso(Utc::now());
         match outcome {
-            FinalizeOutcome::Done => self.finalize_done(job_id, &now).await,
+            FinalizeOutcome::Done => self.finalize_done(job_id, owner, &now).await,
             FinalizeOutcome::Throttled {
                 retry_after,
                 cool_down_queue,
             } => {
-                self.finalize_throttled(job_id, retry_after, cool_down_queue, &now)
+                self.finalize_throttled(job_id, owner, retry_after, cool_down_queue, &now)
                     .await
             }
             FinalizeOutcome::Failed {
@@ -968,6 +980,7 @@ impl SqliteStorage {
                     /* terminal: */ false,
                     Some(&next),
                     /* guard_stale_before: */ None,
+                    /* guard_owner: */ owner,
                 )
                 .await
             }
@@ -980,6 +993,7 @@ impl SqliteStorage {
                     /* terminal: */ true,
                     None,
                     /* guard_stale_before: */ None,
+                    /* guard_owner: */ owner,
                 )
                 .await
             }
@@ -990,23 +1004,28 @@ impl SqliteStorage {
     /// clear any queue-wide throttle cool-down (a success means the
     /// rate-limit window passed). All in one tx so a crash can't leave
     /// the event without the row transition.
-    async fn finalize_done(&self, job_id: &JobId, now: &str) -> Result<()> {
+    async fn finalize_done(&self, job_id: &JobId, owner: Option<&str>, now: &str) -> Result<()> {
         let mut tx = self.write_pool.begin().await.map_err(map_sqlx_err)?;
-        let row = sqlx::query(
-            r"UPDATE sync_queue
+        // Ownership guard (H1): when `owner` is set, only transition a row
+        // still `in_progress` and still owned by this process. A reaped +
+        // re-claimed row fails the guard → 0 rows → clean no-op (no event,
+        // no cool-down clear). `None` skips the guard (admin/test paths).
+        let guard = owner.map_or("", |_| " AND process_id = ?3 AND status = 'in_progress'");
+        let sql = format!(
+            "UPDATE sync_queue
                  SET status            = 'done',
                      completed_at      = ?1,
                      throttle_attempts = 0,
                      process_id        = NULL,
                      heartbeat_at      = NULL
-               WHERE id = ?2
-               RETURNING kind, queue_name",
-        )
-        .bind(now)
-        .bind(job_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_err)?;
+               WHERE id = ?2{guard}
+               RETURNING kind, queue_name"
+        );
+        let mut q = sqlx::query(&sql).bind(now).bind(job_id.as_str());
+        if let Some(pid) = owner {
+            q = q.bind(pid);
+        }
+        let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
         if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
@@ -1032,6 +1051,7 @@ impl SqliteStorage {
     async fn finalize_throttled(
         &self,
         job_id: &JobId,
+        owner: Option<&str>,
         retry_after: Duration,
         cool_down_queue: bool,
         now: &str,
@@ -1040,22 +1060,26 @@ impl SqliteStorage {
             + chrono::Duration::from_std(retry_after)
                 .unwrap_or_else(|_| chrono::Duration::seconds(60)));
         let mut tx = self.write_pool.begin().await.map_err(map_sqlx_err)?;
-        let row = sqlx::query(
-            r"UPDATE sync_queue
+        // Ownership guard (H1) — see `finalize_done`. A stale worker's
+        // throttle finalize must not re-queue a row another worker now
+        // owns (that would let the same job run on 2+ workers).
+        let guard = owner.map_or("", |_| " AND process_id = ?3 AND status = 'in_progress'");
+        let sql = format!(
+            "UPDATE sync_queue
                  SET status            = 'pending',
                      scheduled_at      = ?1,
                      attempts          = MAX(attempts - 1, 0),
                      throttle_attempts = throttle_attempts + 1,
                      process_id        = NULL,
                      heartbeat_at      = NULL
-               WHERE id = ?2
-               RETURNING kind, queue_name",
-        )
-        .bind(&next)
-        .bind(job_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(map_sqlx_err)?;
+               WHERE id = ?2{guard}
+               RETURNING kind, queue_name"
+        );
+        let mut q = sqlx::query(&sql).bind(&next).bind(job_id.as_str());
+        if let Some(pid) = owner {
+            q = q.bind(pid);
+        }
+        let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
         if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
@@ -1425,13 +1449,17 @@ async fn append_error_and_update(
     message: &str,
     terminal: bool,
     next_scheduled_at: Option<&str>,
-    // When set (reaper path), the status transition only fires if the
+    // Reaper path: when set, the status transition only fires if the
     // row is *still* a stale in-flight row — so a job its worker
     // finalized between the reaper's scan and this write isn't clobbered
-    // back to failed/dead (which would re-run it). `None` for the
-    // finalize path, where the owning worker legitimately transitions a
-    // fresh in-flight row.
+    // back to failed/dead (which would re-run it).
     guard_stale_before: Option<&str>,
+    // Finalize path (H1): when set, the transition only fires if the row
+    // is still `in_progress` and still owned by this `process_id` — so a
+    // stalled worker whose claim was reaped + re-claimed can't clobber the
+    // new claimant. Mutually exclusive with `guard_stale_before`; both
+    // `None` skips the guard (legacy / admin paths).
+    guard_owner: Option<&str>,
 ) -> Result<()> {
     // Read attempts + existing error_history, append, re-write. SQLite
     // doesn't have a JSON-array-append in standard syntax so we do the
@@ -1463,12 +1491,16 @@ async fn append_error_and_update(
     }
     let history_s = serde_json::to_string(&entries)?;
 
-    // Reaper-only guard: only transition a row that's still the stale
-    // in-flight row we scanned. Empty for the finalize path.
-    let guard = if guard_stale_before.is_some() {
-        " AND status = 'in_progress' AND heartbeat_at < ?5"
-    } else {
-        ""
+    // Status-transition guard. At most one of the two is set; both bind
+    // `?5`. Owner guard (finalize): still in_progress + owned by us.
+    // Stale guard (reaper): still the stale in_progress row we scanned.
+    let (guard, guard_bind): (&str, Option<&str>) = match (guard_owner, guard_stale_before) {
+        (Some(pid), _) => (" AND status = 'in_progress' AND process_id = ?5", Some(pid)),
+        (None, Some(stale)) => (
+            " AND status = 'in_progress' AND heartbeat_at < ?5",
+            Some(stale),
+        ),
+        (None, None) => ("", None),
     };
 
     if terminal {
@@ -1490,7 +1522,7 @@ async fn append_error_and_update(
             .bind(message)
             .bind(&history_s)
             .bind(job_id.as_str());
-        if let Some(g) = guard_stale_before {
+        if let Some(g) = guard_bind {
             q = q.bind(g);
         }
         let dead_row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
@@ -1528,7 +1560,7 @@ async fn append_error_and_update(
             .bind(message)
             .bind(&history_s)
             .bind(job_id.as_str());
-        if let Some(g) = guard_stale_before {
+        if let Some(g) = guard_bind {
             q = q.bind(g);
         }
         let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;

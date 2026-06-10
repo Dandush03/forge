@@ -129,7 +129,20 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
     /// Finalize a job's lifecycle. The runtime maps `JobOutcome` from
     /// the handler into the right `FinalizeOutcome` variant (with
     /// backoff already computed).
-    async fn finalize(&self, job_id: &JobId, outcome: FinalizeOutcome) -> Result<()>;
+    ///
+    /// `owner` is the `process_id` that claimed the row. When `Some`, the
+    /// transition only fires if the row is *still* `in_progress` and still
+    /// owned by that process — so a worker whose claim was reaped and
+    /// re-claimed by another worker (it stalled past the stale threshold)
+    /// can't clobber the new claimant's row. When `None` the guard is
+    /// skipped (admin / test paths that legitimately finalize an
+    /// arbitrary row). The worker loop always passes `Some`.
+    async fn finalize(
+        &self,
+        job_id: &JobId,
+        owner: Option<&str>,
+        outcome: FinalizeOutcome,
+    ) -> Result<()>;
 
     /// Update `heartbeat_at` on an in-flight job. Called periodically
     /// by the worker's heartbeat side-task so long handlers don't trip
