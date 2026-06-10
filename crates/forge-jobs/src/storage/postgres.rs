@@ -456,10 +456,18 @@ impl JobQueue for PostgresStorage {
 
     async fn revive_stale(&self, stale_before: DateTime<Utc>) -> Result<u64> {
         let _t = OpTimer::write(&self.db_recorder);
-        // Same shape as the SQLite adapter: pull each stale row's
-        // owning queue backoff config in one SELECT so the per-queue
-        // toggle is honoured. `FOR UPDATE OF j SKIP LOCKED` locks
-        // only the `sync_queue` rows, not the joined `queue` rows.
+        // Same shape as the SQLite adapter: pull each stale row's owning
+        // queue backoff config in one SELECT so the per-queue toggle is
+        // honoured.
+        //
+        // L1: this SELECT runs in autocommit, so any row lock would
+        // release at statement end and fence nothing — the real
+        // cross-reaper fence is the `status = 'in_progress' AND
+        // heartbeat_at < cutoff` guard inside `append_error_and_update`'s
+        // UPDATE. Two replicas' reapers may both scan the same rows; the
+        // loser's guarded UPDATE no-ops (its `revived` count can then
+        // over-report — a log number only). So no `FOR UPDATE` here:
+        // it would read as a fence it isn't.
         let rows = sqlx::query(
             r"SELECT j.id, j.attempts, j.max_attempts,
                      COALESCE(q.backoff_enabled, FALSE)     AS backoff_enabled,
@@ -467,8 +475,7 @@ impl JobQueue for PostgresStorage {
                      COALESCE(q.backoff_max_seconds, 1800)  AS backoff_max_seconds
                 FROM sync_queue j
                 LEFT JOIN queue q ON q.name = j.queue_name
-               WHERE j.status = 'in_progress' AND j.heartbeat_at < $1
-               FOR UPDATE OF j SKIP LOCKED",
+               WHERE j.status = 'in_progress' AND j.heartbeat_at < $1",
         )
         .bind(stale_before)
         .fetch_all(&self.pool)
@@ -916,40 +923,33 @@ impl JobQueue for PostgresStorage {
         let _t = OpTimer::write(&self.db_recorder);
         let batch_i = i64::try_from(batch_size).unwrap_or(i64::MAX);
         crate::storage::with_transient_retry("delete_batch_by_status", || async {
-            let mut tx = self.pool.begin().await.map_err(map_sqlx_err)?;
-            sqlx::query(
-                r"DELETE FROM queue_event
-                   WHERE job_id IN (
-                       SELECT id FROM sync_queue
-                        WHERE status = $1
-                          AND ($2::TEXT IS NULL OR queue_name = $2)
-                        ORDER BY id ASC
-                        LIMIT $3
-                   )",
-            )
-            .bind(status.as_str())
-            .bind(queue)
-            .bind(batch_i)
-            .execute(&mut *tx)
-            .await
-            .map_err(map_sqlx_err)?;
+            // L2: pick the victim ids ONCE in a CTE so the event-delete and
+            // the row-delete operate on the same set. As two separate
+            // statements (even in one READ COMMITTED tx) each re-snapshots,
+            // so a row that became eligible between them could be deleted
+            // with its `queue_event` rows orphaned (chart-gauge skew). All
+            // CTEs in one statement share a snapshot; `FOR UPDATE SKIP
+            // LOCKED` also keeps concurrent batch purges from contending.
             let res = sqlx::query(
-                r"DELETE FROM sync_queue
-                   WHERE id IN (
-                       SELECT id FROM sync_queue
-                        WHERE status = $1
-                          AND ($2::TEXT IS NULL OR queue_name = $2)
-                        ORDER BY id ASC
-                        LIMIT $3
-                   )",
+                r"WITH victims AS (
+                      SELECT id FROM sync_queue
+                       WHERE status = $1
+                         AND ($2::TEXT IS NULL OR queue_name = $2)
+                       ORDER BY id ASC
+                       LIMIT $3
+                       FOR UPDATE SKIP LOCKED
+                  ),
+                  ev AS (
+                      DELETE FROM queue_event WHERE job_id IN (SELECT id FROM victims)
+                  )
+                  DELETE FROM sync_queue WHERE id IN (SELECT id FROM victims)",
             )
             .bind(status.as_str())
             .bind(queue)
             .bind(batch_i)
-            .execute(&mut *tx)
+            .execute(&self.pool)
             .await
             .map_err(map_sqlx_err)?;
-            tx.commit().await.map_err(map_sqlx_err)?;
             Ok(res.rows_affected())
         })
         .await
