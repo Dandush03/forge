@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "forge-jobs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "forge-jobs-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -794,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "forge-jobs-ui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "chrono",

@@ -1,6 +1,6 @@
 [package]
 name = "forge-jobs"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Daniel Laloush <dandush03@users.noreply.github.com>"]
 edition = "2024"
 rust-version = "1.92"
@@ -73,6 +73,14 @@ tempfile = { workspace = true }
 # doesn't run them.
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres"] }
+# The postgres integration tests' external-DB mode (TEST_DATABASE_URL): a
+# raw admin connection to CREATE/DROP a unique per-test database (so a
+# shared compose / CI Postgres gives the same isolation testcontainers
+# does per-container), and `ulid` to name those databases uniquely. Both
+# are already in the tree as normal deps; listing them here just makes
+# them visible to the test target.
+sqlx     = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+ulid     = "1"
 
 [lints]
 workspace = true
