@@ -25,6 +25,7 @@ use sqlx::{Row, Sqlite, Transaction};
 use super::{READ_POOL_MAX, SqliteStorage, WRITE_POOL_MAX, map_sqlx_err};
 use crate::storage::db_timing::OpTimer;
 use crate::storage::error::{Result, StorageError};
+use crate::storage::event_buffer::{EventBuffer, EventRecord};
 use crate::storage::types::{
     EnqueueOutcome, EnqueueRequest, ErrorHistoryEntry, FinalizeOutcome, JobId, JobLatency,
     JobRecord, JobStatus, MetricBucket, QueueCounts, TimelineEvent, TimelineEventType, metric,
@@ -43,8 +44,12 @@ impl JobQueue for SqliteStorage {
         let _t = OpTimer::write(&self.db_recorder);
         let new_id = self.next_ulid().await.to_string();
         let mut tx = self.write_pool.begin().await.map_err(map_sqlx_err)?;
-        let outcome = enqueue_in_tx(&mut tx, &req, &new_id).await?;
+        let mut pending = Vec::new();
+        let outcome = enqueue_in_tx(&mut tx, &req, &new_id, &mut pending).await?;
         tx.commit().await.map_err(map_sqlx_err)?;
+        // Push events only after the commit so a rolled-back enqueue
+        // leaves no phantom timeline row.
+        self.events.push_all(pending);
 
         if matches!(outcome, EnqueueOutcome::Enqueued(_))
             && let Some(queue) = req.queue_name.as_deref()
@@ -75,8 +80,9 @@ impl JobQueue for SqliteStorage {
         let mut tx = self.write_pool.begin().await.map_err(map_sqlx_err)?;
         let mut outcomes = Vec::with_capacity(reqs.len());
         let mut notify_queues: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut pending: Vec<EventRecord> = Vec::new();
         for (req, new_id) in reqs.iter().zip(new_ids.iter()) {
-            let outcome = enqueue_in_tx(&mut tx, req, new_id).await?;
+            let outcome = enqueue_in_tx(&mut tx, req, new_id, &mut pending).await?;
             if matches!(outcome, EnqueueOutcome::Enqueued(_))
                 && let Some(q) = req.queue_name.as_deref()
             {
@@ -85,6 +91,8 @@ impl JobQueue for SqliteStorage {
             outcomes.push(outcome);
         }
         tx.commit().await.map_err(map_sqlx_err)?;
+        // Push events only after the commit — see `enqueue`.
+        self.events.push_all(pending);
 
         for q in notify_queues {
             self.notify.for_queue(&q).await.notify_one();
@@ -164,20 +172,18 @@ impl JobQueue for SqliteStorage {
         let Some(job) = row.as_ref().map(row_to_job).transpose()? else {
             return Ok(None);
         };
-        // Record the `started` event as a separate statement. If we
-        // crash between the UPDATE and this INSERT the chart loses
-        // one start event (the reaper will revive the row and the
-        // re-claim writes a new event then); acceptable since the
-        // event log is for chart aggregates, not correctness.
-        let _ = record_event(
-            &self.write_pool,
-            &now_iso,
+        // Buffer the `started` event for the background flush. As
+        // before, a crash before it reaches storage loses one chart
+        // event (the reaper revives the row and the re-claim emits a
+        // fresh one); the event log is for chart aggregates, not
+        // correctness.
+        self.events.push(EventRecord::new(
+            now,
             &job.kind,
             &job.queue_name,
             Some(job.id.as_str()),
             "started",
-        )
-        .await;
+        ));
         Ok(Some(job))
     }
 
@@ -262,6 +268,7 @@ impl JobQueue for SqliteStorage {
             if terminal {
                 append_error_and_update(
                     &self.write_pool,
+                    &self.events,
                     &job_id,
                     &now,
                     "reaped after stale heartbeat",
@@ -281,6 +288,7 @@ impl JobQueue for SqliteStorage {
                 let next = iso(Utc::now() + ChronoDuration::from_std(delay).unwrap_or_default());
                 append_error_and_update(
                     &self.write_pool,
+                    &self.events,
                     &job_id,
                     &now,
                     "reaped after stale heartbeat",
@@ -902,6 +910,40 @@ impl JobQueue for SqliteStorage {
         self.db_recorder.drain()
     }
 
+    async fn flush_event_buffer(&self) -> Result<u64> {
+        let _t = OpTimer::write(&self.db_recorder);
+        let (events, dropped) = self.events.drain();
+        if dropped > 0 {
+            tracing::warn!(
+                dropped,
+                "queue_event: buffered events dropped at cap before flush"
+            );
+        }
+        if events.is_empty() {
+            return Ok(0);
+        }
+        let total = events.len();
+        // SQLite caps bound variables (default 999); 5 cols/row → ≤100
+        // rows per multi-row INSERT stays well under the limit.
+        for chunk in events.chunks(100) {
+            let mut qb = sqlx::QueryBuilder::<Sqlite>::new(
+                "INSERT INTO queue_event (at, kind, queue_name, event_type, job_id) ",
+            );
+            qb.push_values(chunk, |mut b, ev| {
+                b.push_bind(iso(ev.at))
+                    .push_bind(ev.kind.as_str())
+                    .push_bind(ev.queue_name.as_str())
+                    .push_bind(ev.event_type)
+                    .push_bind(ev.job_id.as_deref());
+            });
+            qb.build()
+                .execute(&self.write_pool)
+                .await
+                .map_err(map_sqlx_err)?;
+        }
+        Ok(u64::try_from(total).unwrap_or(u64::MAX))
+    }
+
     async fn db_health_snapshot(&self) -> Vec<(&'static str, f64)> {
         // SQLite has no server-side connection model — `pool_active`
         // here would just reflect sqlx's in-process accounting between
@@ -982,6 +1024,7 @@ impl SqliteStorage {
                         .unwrap_or_else(|_| chrono::Duration::seconds(60)));
                 append_error_and_update(
                     &self.write_pool,
+                    &self.events,
                     job_id,
                     &now,
                     &message,
@@ -995,6 +1038,7 @@ impl SqliteStorage {
             FinalizeOutcome::Dead { message } => {
                 append_error_and_update(
                     &self.write_pool,
+                    &self.events,
                     job_id,
                     &now,
                     &message,
@@ -1034,21 +1078,27 @@ impl SqliteStorage {
             q = q.bind(pid);
         }
         let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
-        if let Some(r) = row {
+        // Cool-down clear is queue *state*, not a chart event — it stays
+        // inside the tx. The `completed` event is buffered and pushed only
+        // after commit.
+        let pending = if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
-                now,
-                &kind,
-                &queue_name,
+            clear_queue_cooldown(&mut *tx, &queue_name, now).await?;
+            Some(EventRecord::new(
+                parse_dt(now).unwrap_or_else(|_| Utc::now()),
+                kind,
+                queue_name,
                 Some(job_id.as_str()),
                 "completed",
-            )
-            .await?;
-            clear_queue_cooldown(&mut *tx, &queue_name, now).await?;
-        }
+            ))
+        } else {
+            None
+        };
         tx.commit().await.map_err(map_sqlx_err)?;
+        if let Some(ev) = pending {
+            self.events.push(ev);
+        }
         Ok(())
     }
 
@@ -1088,23 +1138,28 @@ impl SqliteStorage {
             q = q.bind(pid);
         }
         let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
-        if let Some(r) = row {
+        // Cool-down extension is queue state — stays in the tx. The
+        // `retried` event is buffered and pushed after commit.
+        let pending = if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
-                now,
-                &kind,
-                &queue_name,
-                Some(job_id.as_str()),
-                "retried",
-            )
-            .await?;
             if cool_down_queue {
                 extend_queue_cooldown(&mut *tx, &queue_name, &next, now).await?;
             }
-        }
+            Some(EventRecord::new(
+                parse_dt(now).unwrap_or_else(|_| Utc::now()),
+                kind,
+                queue_name,
+                Some(job_id.as_str()),
+                "retried",
+            ))
+        } else {
+            None
+        };
         tx.commit().await.map_err(map_sqlx_err)?;
+        if let Some(ev) = pending {
+            self.events.push(ev);
+        }
         Ok(())
     }
 }
@@ -1255,6 +1310,7 @@ async fn enqueue_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     req: &EnqueueRequest,
     new_id: &str,
+    pending: &mut Vec<EventRecord>,
 ) -> Result<EnqueueOutcome> {
     let queue = req
         .queue_name
@@ -1271,7 +1327,8 @@ async fn enqueue_in_tx(
     }
 
     let id = new_id.to_owned();
-    let now = iso(Utc::now());
+    let now_dt = Utc::now();
+    let now = iso(now_dt);
     let scheduled = iso(req.run_at.unwrap_or_else(Utc::now));
     let payload_s = serde_json::to_string(&req.payload)?;
     let max_attempts = req.max_attempts.unwrap_or(DEFAULT_MAX_ATTEMPTS);
@@ -1319,51 +1376,17 @@ async fn enqueue_in_tx(
         ));
     }
 
-    // Append-only timeline log. Same transaction so a crashed enqueue
-    // doesn't leave the event without a job row.
-    record_event(
-        &mut **tx,
-        &now,
+    // Buffer the `enqueued` event; the caller pushes it after the tx
+    // commits, so a rolled-back insert leaves no orphan event.
+    pending.push(EventRecord::new(
+        now_dt,
         req.kind.as_ref(),
         queue,
         Some(&id),
         "enqueued",
-    )
-    .await?;
+    ));
 
     Ok(EnqueueOutcome::Enqueued(JobId::new(id)))
-}
-
-/// Append one row to the `queue_event` log. Caller passes the
-/// connection (transaction or pool) and the ISO timestamp so the
-/// caller controls whether the write is in a tx with sibling
-/// statements. `job_id` is `None` only for legacy callers — the
-/// `Some` path lets purge / `cleanup_aged` cascade-delete events when
-/// the matching `sync_queue` row is deleted.
-async fn record_event<'e, E>(
-    executor: E,
-    at_iso: &str,
-    kind: &str,
-    queue_name: &str,
-    job_id: Option<&str>,
-    event_type: &str,
-) -> Result<()>
-where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
-{
-    sqlx::query(
-        r"INSERT INTO queue_event (at, kind, queue_name, event_type, job_id)
-          VALUES (?1, ?2, ?3, ?4, ?5)",
-    )
-    .bind(at_iso)
-    .bind(kind)
-    .bind(queue_name)
-    .bind(event_type)
-    .bind(job_id)
-    .execute(executor)
-    .await
-    .map_err(map_sqlx_err)?;
-    Ok(())
 }
 
 /// Open (or extend) the queue-wide throttle cool-down for one limiter
@@ -1457,6 +1480,7 @@ const fn active_status_placeholders() -> &'static str {
 )]
 async fn append_error_and_update(
     pool: &sqlx::SqlitePool,
+    events: &EventBuffer,
     job_id: &JobId,
     now_iso: &str,
     message: &str,
@@ -1516,9 +1540,9 @@ async fn append_error_and_update(
         (None, None) => ("", None),
     };
 
+    // Event buffered here, pushed only after the tx commits below.
+    let mut pending: Option<EventRecord> = None;
     if terminal {
-        // UPDATE + event-log INSERT in the same tx so a crash can't
-        // leave the event without the row transition.
         let sql = format!(
             "UPDATE sync_queue
                  SET status         = 'dead',
@@ -1542,15 +1566,13 @@ async fn append_error_and_update(
         if let Some(r) = dead_row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
-                now_iso,
-                &kind,
-                &queue_name,
+            pending = Some(EventRecord::new(
+                parse_dt(now_iso).unwrap_or_else(|_| Utc::now()),
+                kind,
+                queue_name,
                 Some(job_id.as_str()),
                 "failed",
-            )
-            .await?;
+            ));
         }
     } else {
         // Non-terminal retry: status goes back to `failed` (the retry
@@ -1580,17 +1602,18 @@ async fn append_error_and_update(
         if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
-                now_iso,
-                &kind,
-                &queue_name,
+            pending = Some(EventRecord::new(
+                parse_dt(now_iso).unwrap_or_else(|_| Utc::now()),
+                kind,
+                queue_name,
                 Some(job_id.as_str()),
                 "retried",
-            )
-            .await?;
+            ));
         }
     }
     tx.commit().await.map_err(map_sqlx_err)?;
+    if let Some(ev) = pending {
+        events.push(ev);
+    }
     Ok(())
 }

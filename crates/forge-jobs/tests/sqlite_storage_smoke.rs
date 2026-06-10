@@ -868,6 +868,9 @@ async fn metrics_roll_once_aggregates_completed_job() {
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
+    // Timeline events are buffered; flush them before the roller reads
+    // queue_event to aggregate the per-minute counts.
+    s.flush_event_buffer().await.unwrap();
 
     // Roll with `now` two minutes ahead so the just-completed job's
     // minute bucket is closed and inside the lookback window.
@@ -1041,6 +1044,8 @@ async fn retry_cycle_emits_balanced_events() {
     tokio::time::sleep(Duration::from_millis(5)).await;
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
+    // Events are buffered off the hot path; flush to read them back.
+    s.flush_event_buffer().await.unwrap();
 
     let now = Utc::now();
     let events = s
@@ -1091,6 +1096,8 @@ async fn delete_cascades_to_queue_event_rows() {
     };
     let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
     s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
+    // Flush buffered events so the cascade-delete has rows to clear.
+    s.flush_event_buffer().await.unwrap();
 
     // Pre-delete: 3 events (Enqueued, Started, Completed).
     let now = Utc::now();
@@ -1116,6 +1123,80 @@ async fn delete_cascades_to_queue_event_rows() {
         post.is_empty(),
         "expected cascade-delete to clear events; got {post:?}"
     );
+}
+
+#[tokio::test]
+async fn timeline_events_are_buffered_until_flushed() {
+    // The hot path buffers events off-transaction; they only reach
+    // queue_event on flush. Read the timeline before flushing and it's
+    // empty; flush and the three events appear.
+    let s = fresh().await;
+    let id = match s
+        .enqueue(EnqueueRequest::new("k", json!({})).on_queue("gh"))
+        .await
+        .unwrap()
+    {
+        EnqueueOutcome::Enqueued(id) => id,
+        _ => unreachable!(),
+    };
+    let _ = s.claim_next("gh", "w-0").await.unwrap().unwrap();
+    s.finalize(&id, None, FinalizeOutcome::Done).await.unwrap();
+
+    let now = Utc::now();
+    let from = now - chrono::Duration::seconds(60);
+    let to = now + chrono::Duration::seconds(60);
+
+    let before = s.list_for_timeline(from, to).await.unwrap();
+    assert!(
+        before.is_empty(),
+        "events should be buffered, not yet in queue_event; got {before:?}"
+    );
+
+    let flushed = s.flush_event_buffer().await.unwrap();
+    assert_eq!(flushed, 3, "enqueued + started + completed");
+
+    let after = s.list_for_timeline(from, to).await.unwrap();
+    assert_eq!(after.len(), 3);
+
+    // A second flush with an empty buffer is a no-op.
+    assert_eq!(s.flush_event_buffer().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn deduped_enqueue_emits_no_extra_event() {
+    // A deduped enqueue inserts no row, so it must buffer no event —
+    // the timeline carries exactly one `enqueued` for the winning row.
+    use forge_jobs::TimelineEventType;
+
+    let s = fresh().await;
+    let req = || {
+        EnqueueRequest::new("k", json!({}))
+            .on_queue("gh")
+            .with_dedupe_key("key-1")
+    };
+    let first = s.enqueue(req()).await.unwrap();
+    assert!(matches!(first, EnqueueOutcome::Enqueued(_)));
+    let second = s.enqueue(req()).await.unwrap();
+    assert!(
+        matches!(second, EnqueueOutcome::Deduped(_)),
+        "second enqueue with the same active dedupe key dedupes"
+    );
+
+    s.flush_event_buffer().await.unwrap();
+    let now = Utc::now();
+    let events = s
+        .list_for_timeline(
+            now - chrono::Duration::seconds(60),
+            now + chrono::Duration::seconds(60),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        events.len(),
+        1,
+        "only the inserted row emits an event; got {events:?}"
+    );
+    assert_eq!(events[0].event_type, TimelineEventType::Enqueued);
 }
 
 #[tokio::test]

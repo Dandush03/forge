@@ -76,6 +76,14 @@ async fn runtime_runs_one_noop_echo_job_to_done() {
     }
 
     // ── timeline events ───────────────────────────────────────────
+    // Events are buffered off the hot path and flushed by a background
+    // loop every couple seconds; force a flush so the read is
+    // deterministic rather than racing the tick.
+    storage
+        .jobs
+        .flush_event_buffer()
+        .await
+        .expect("flush_event_buffer");
     let from = Utc::now() - ChronoDuration::seconds(60);
     let to = Utc::now() + ChronoDuration::seconds(10);
     let events = storage

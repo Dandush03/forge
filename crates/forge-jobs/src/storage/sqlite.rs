@@ -38,6 +38,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePo
 
 use super::db_timing::DbRecorder;
 use super::error::{Result, StorageError};
+use super::event_buffer::EventBuffer;
 
 /// Single-connection write pool — see the `finish` doc comment for why
 /// `SQLite` caps writers at 1.
@@ -75,6 +76,12 @@ pub struct SqliteStorage {
     /// `OpTimer` that records the elapsed ms here on drop. The metrics
     /// roller drains it once per tick.
     pub(super) db_recorder: Arc<DbRecorder>,
+    /// In-process timeline-event buffer. Worker paths push committed
+    /// `queue_event` rows here instead of inserting them inline; the
+    /// runtime's `event_flush_loop` drains and batch-inserts them.
+    /// `Arc` so every clone of this storage (one per background loop)
+    /// shares the buffer the workers push into.
+    pub(super) events: Arc<EventBuffer>,
     /// Path the on-disk database was opened from, used by the
     /// DB-health snapshot to stat the `-wal` sidecar. `None` for
     /// in-memory storages (tests) — they have no file to stat.
@@ -161,6 +168,7 @@ impl SqliteStorage {
             notify: Arc::new(notify::NotifyHub::default()),
             ulid_gen: Arc::new(tokio::sync::Mutex::new(ulid::Generator::new())),
             db_recorder: Arc::new(DbRecorder::default()),
+            events: Arc::new(EventBuffer::default()),
             db_path: None,
         })
     }
@@ -207,6 +215,7 @@ impl SqliteStorage {
             notify: Arc::new(notify::NotifyHub::default()),
             ulid_gen: Arc::new(tokio::sync::Mutex::new(ulid::Generator::new())),
             db_recorder: Arc::new(DbRecorder::default()),
+            events: Arc::new(EventBuffer::default()),
             db_path,
         })
     }

@@ -100,6 +100,15 @@ pub const REAPER_TICK: Duration = Duration::from_secs(15);
 const STALE_THRESHOLD: ChronoDuration = ChronoDuration::seconds(60);
 /// Retention cleanup cadence.
 pub const CLEANUP_TICK: Duration = Duration::from_mins(5);
+/// Timeline-event flush cadence.
+///
+/// Workers buffer `queue_event` rows in-process (off the hot enqueue /
+/// claim / finalize transactions); this loop drains and batch-inserts
+/// them. Well under `METRICS_TICK` (60s) so a minute's events are
+/// persisted before the metrics roller aggregates them, and short enough
+/// that a crash loses only a small tail of chart data. Runs on every
+/// replica — each flushes its own buffer.
+pub const EVENT_FLUSH_TICK: Duration = Duration::from_secs(2);
 /// Default `shutdown_graceful` timeout.
 pub const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -228,6 +237,10 @@ impl QueueRuntime {
             self.host_id.clone(),
             shutdown.clone(),
         ));
+        // Timeline-event flush: drain this replica's in-process event
+        // buffer and batch-insert into queue_event. Not lease-gated —
+        // every replica flushes the events its own workers produced.
+        join_set.spawn(event_flush_loop(self.storage.clone(), shutdown.clone()));
 
         Ok(QueueHandle {
             shutdown,
@@ -336,6 +349,13 @@ impl QueueHandle {
             );
             self.join_set.abort_all();
             while self.join_set.join_next().await.is_some() {}
+        }
+        // Workers have now drained (or been aborted); flush once more so
+        // any timeline events buffered during the drain window — after
+        // event_flush_loop did its own final flush and exited — still
+        // land. Best-effort: chart data, never job state.
+        if let Err(e) = self.storage.jobs.flush_event_buffer().await {
+            tracing::warn!(?e, host_id = %self.host_id, "event flush on shutdown failed");
         }
         if let Err(e) = self.storage.procs.delete_for_host(&self.host_id).await {
             tracing::warn!(?e, host_id = %self.host_id, "delete_for_host on shutdown failed");
@@ -1002,6 +1022,39 @@ async fn reaper_loop(storage: Storage, shutdown: CancellationToken) {
 pub async fn reap_stale_jobs(storage: &Storage) -> Result<u64> {
     let stale_before = Utc::now() - STALE_THRESHOLD;
     storage.jobs.revive_stale(stale_before).await
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Timeline-event flush — one task per runtime, on every replica.
+// ────────────────────────────────────────────────────────────────────
+
+/// Drain this replica's in-process timeline-event buffer and batch-insert
+/// the rows into `queue_event` on every tick, plus one final flush on
+/// shutdown so a graceful exit doesn't drop the tail. The buffer is the
+/// adapter's; mock backends default to a no-op `flush_event_buffer`.
+async fn event_flush_loop(storage: Storage, shutdown: CancellationToken) {
+    tracing::debug!("event flush: start");
+    let mut tick = tokio::time::interval(EVENT_FLUSH_TICK);
+    tick.tick().await;
+    loop {
+        tokio::select! {
+            biased;
+            () = shutdown.cancelled() => {
+                // Final drain — persist whatever workers buffered before
+                // the cancel so a clean shutdown loses nothing.
+                if let Err(e) = storage.jobs.flush_event_buffer().await {
+                    tracing::warn!(?e, "event flush: final flush failed");
+                }
+                tracing::debug!("event flush: shutdown");
+                return;
+            }
+            _ = tick.tick() => {
+                if let Err(e) = storage.jobs.flush_event_buffer().await {
+                    tracing::warn!(?e, "event flush: flush failed");
+                }
+            }
+        }
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
