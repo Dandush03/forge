@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use leptos::leptos_dom::helpers::set_interval_with_handle;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -146,6 +146,18 @@ fn CronRow(
             live.with(|l| l.as_ref().and_then(|r| r.last_fired_at)),
             "ago",
             "in",
+        )
+    });
+    // Absolute next/last fire in the operator's local timezone (+ UTC).
+    // The runtime evaluates cron in UTC (M3) so the cadence is stable
+    // across replicas; this hover tooltip makes "0 9 * * *" legible as a
+    // wall-clock time in the viewer's zone rather than leaving them to
+    // guess UTC. The labels above stay relative ("in 5m") — TZ-agnostic.
+    let fire_title = Memo::new(move |_| {
+        format!(
+            "next fire: {}\nlast fire: {}",
+            absolute_local_opt(live.with(|l| l.as_ref().and_then(|r| r.next_fire_at))),
+            absolute_local_opt(live.with(|l| l.as_ref().and_then(|r| r.last_fired_at))),
         )
     });
     let live_last_error =
@@ -305,7 +317,7 @@ fn CronRow(
             }) }
 
             <footer class="queue-cron-row-foot">
-                <span class="queue-cron-fire">
+                <span class="queue-cron-fire" title=move || fire_title.get()>
                     { move || format!("next: {} · last: {}", next_fire_label.get(), last_fire_label.get()) }
                 </span>
                 { move || live_last_error.get().map(|msg| {
@@ -319,6 +331,21 @@ fn CronRow(
             </footer>
         </li>
     }
+}
+
+/// Absolute timestamp in the viewer's local timezone, with the UTC time
+/// alongside (the runtime evaluates cron in UTC). `None` → "—".
+fn absolute_local_opt(when: Option<DateTime<Utc>>) -> String {
+    when.map_or_else(
+        || "—".to_owned(),
+        |t| {
+            format!(
+                "{} (local) · {} UTC",
+                t.with_timezone(&Local).format("%Y-%m-%d %H:%M"),
+                t.format("%H:%M")
+            )
+        },
+    )
 }
 
 fn relative_label_opt(

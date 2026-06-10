@@ -71,7 +71,6 @@ impl BulkAction {
             Self::Requeue => "Requeue",
         }
     }
-
 }
 
 #[derive(Clone, Copy)]
