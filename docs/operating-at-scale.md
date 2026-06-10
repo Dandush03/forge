@@ -126,6 +126,39 @@ duplicated job state. If you don't need the timeline at all at your
 volume, the cheapest path is to stop reading it; the per-minute
 `metric_bucket` rollups cover counts at 60s resolution independently.
 
+## Load testing
+
+Two harnesses ship with the crate (both Postgres-only, both need a live
+DB via `DATABASE_URL` / `TEST_DATABASE_URL`):
+
+- **`src/bin/loadgen.rs`** — whole-system soak: seeds a backlog, drives
+  sustained enqueue/claim/finalize across N workers (and optional feeders),
+  then reports throughput, claim-latency percentiles, and a
+  `pg_stat_user_tables` bloat snapshot. Env-configurable
+  (`LOADGEN_SEED`/`WORKERS`/`FEED`/`DURATION_SECS`). Run it at increasing
+  `LOADGEN_SEED` to watch how claim latency tracks the ready-set depth.
+
+  ```text
+  docker compose up -d postgres
+  DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres \
+    LOADGEN_SEED=200000 LOADGEN_WORKERS=8 \
+    cargo run -p forge-jobs --features postgres --bin loadgen --release
+  ```
+
+- **`benches/queue_ops.rs`** — criterion microbenchmarks for `enqueue` and
+  `claim_next`+`finalize` at a couple of table sizes, for per-op regression
+  tracking: `cargo bench -p forge-jobs --features postgres`.
+
+### Cold stats after a bulk backfill
+
+Postgres plans `claim_next` from table statistics. Immediately after a
+large bulk load (a backfill, a restore) the stats are stale and the planner
+can pick a sequential scan + sort — claims run orders of magnitude slower
+until autovacuum's auto-analyze fires (~one `autovacuum_naptime` later, 60s
+by default). After any bulk insert, run `ANALYZE sync_queue` (or wait out a
+naptime) before expecting normal claim latency. `loadgen` does this
+automatically after seeding.
+
 ## Clock domains (debugging "a pod flapped out of the live set")
 
 The coordinator lease compares and writes timestamps with the **database
