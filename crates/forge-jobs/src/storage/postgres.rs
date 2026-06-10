@@ -52,6 +52,7 @@ const WAKE_CHANNEL: &str = "forge_jobs_wake";
 
 use super::db_timing::{DbRecorder, OpTimer};
 use super::error::{Result, StorageError};
+use super::event_buffer::{EventBuffer, EventRecord};
 use super::types::{
     CronScheduleRecord, EnqueueOutcome, EnqueueRequest, ErrorHistoryEntry, FinalizeOutcome, JobId,
     JobLatency, JobRecord, JobStatus, MetricBucket, NewCronSchedule, ProcessRecord, QueueConfigRow,
@@ -101,6 +102,12 @@ pub struct PostgresStorage {
     /// Per-call latency buffer for the `db_op_ms` rollup. See
     /// [`super::db_timing`].
     db_recorder: Arc<DbRecorder>,
+    /// In-process timeline-event buffer. Worker paths push committed
+    /// `queue_event` rows here; the runtime's `event_flush_loop` drains
+    /// and batch-inserts them, keeping the inserts off the hot enqueue /
+    /// claim / finalize transactions. `Arc` so every clone of this
+    /// storage shares the one buffer.
+    events: Arc<EventBuffer>,
     /// Per-queue in-process wake registry, fed by the listener task and
     /// consumed by `wait_for_work` (H2).
     wake: Arc<WakeHub>,
@@ -257,6 +264,7 @@ impl PostgresStorage {
             max_connections,
             ulid_gen: Arc::new(tokio::sync::Mutex::new(ulid::Generator::new())),
             db_recorder: Arc::new(DbRecorder::default()),
+            events: Arc::new(EventBuffer::default()),
             wake,
             listener_cancel,
         })
@@ -283,8 +291,12 @@ impl JobQueue for PostgresStorage {
         let _t = OpTimer::write(&self.db_recorder);
         let new_id = self.next_ulid().await.to_string();
         let mut tx = self.pool.begin().await.map_err(map_sqlx_err)?;
-        let outcome = enqueue_in_tx(&mut tx, &req, &new_id).await?;
+        let mut pending = Vec::new();
+        let outcome = enqueue_in_tx(&mut tx, &req, &new_id, &mut pending).await?;
         tx.commit().await.map_err(map_sqlx_err)?;
+        // Push events only after the commit so a rolled-back enqueue
+        // leaves no phantom timeline row.
+        self.events.push_all(pending);
 
         if matches!(outcome, EnqueueOutcome::Enqueued(_))
             && let Some(queue) = req.queue_name.as_deref()
@@ -312,8 +324,9 @@ impl JobQueue for PostgresStorage {
         let mut tx = self.pool.begin().await.map_err(map_sqlx_err)?;
         let mut outcomes = Vec::with_capacity(reqs.len());
         let mut notify_queues: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut pending: Vec<EventRecord> = Vec::new();
         for (req, new_id) in reqs.iter().zip(new_ids.iter()) {
-            let outcome = enqueue_in_tx(&mut tx, req, new_id).await?;
+            let outcome = enqueue_in_tx(&mut tx, req, new_id, &mut pending).await?;
             if matches!(outcome, EnqueueOutcome::Enqueued(_))
                 && let Some(q) = req.queue_name.as_deref()
             {
@@ -322,6 +335,8 @@ impl JobQueue for PostgresStorage {
             outcomes.push(outcome);
         }
         tx.commit().await.map_err(map_sqlx_err)?;
+        // Push events only after the commit — see `enqueue`.
+        self.events.push_all(pending);
 
         for q in notify_queues {
             self.notify(&q).await?;
@@ -396,19 +411,17 @@ impl JobQueue for PostgresStorage {
         let Some(job) = row.as_ref().map(row_to_job).transpose()? else {
             return Ok(None);
         };
-        // Best-effort `started` event. Same crash semantics as the
-        // SQLite adapter: a crash between claim UPDATE and this INSERT
-        // loses one chart event; the reaper later revives the row and
-        // the re-claim writes a fresh `started`.
-        let _ = record_event(
-            &self.pool,
+        // Buffer the `started` event for the background flush. Same
+        // crash semantics as before: a crash before it reaches storage
+        // loses one chart event; the reaper revives the row and the
+        // re-claim emits a fresh `started`.
+        self.events.push(EventRecord::new(
             now,
             &job.kind,
             &job.queue_name,
             Some(job.id.as_str()),
             "started",
-        )
-        .await;
+        ));
         Ok(Some(job))
     }
 
@@ -495,6 +508,7 @@ impl JobQueue for PostgresStorage {
             if terminal {
                 append_error_and_update(
                     &self.pool,
+                    &self.events,
                     &job_id,
                     Utc::now(),
                     "reaped after stale heartbeat",
@@ -514,6 +528,7 @@ impl JobQueue for PostgresStorage {
                 let next = Utc::now() + ChronoDuration::from_std(delay).unwrap_or_default();
                 append_error_and_update(
                     &self.pool,
+                    &self.events,
                     &job_id,
                     Utc::now(),
                     "reaped after stale heartbeat",
@@ -1137,6 +1152,37 @@ impl JobQueue for PostgresStorage {
         self.db_recorder.drain()
     }
 
+    async fn flush_event_buffer(&self) -> Result<u64> {
+        let _t = OpTimer::write(&self.db_recorder);
+        let (events, dropped) = self.events.drain();
+        if dropped > 0 {
+            tracing::warn!(
+                dropped,
+                "queue_event: buffered events dropped at cap before flush"
+            );
+        }
+        if events.is_empty() {
+            return Ok(0);
+        }
+        let total = events.len();
+        // Postgres caps bound params at 65535; 5 cols/row → 1000 rows
+        // per multi-row INSERT keeps each statement comfortably small.
+        for chunk in events.chunks(1000) {
+            let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new(
+                "INSERT INTO queue_event (at, kind, queue_name, event_type, job_id) ",
+            );
+            qb.push_values(chunk, |mut b, ev| {
+                b.push_bind(ev.at)
+                    .push_bind(ev.kind.as_str())
+                    .push_bind(ev.queue_name.as_str())
+                    .push_bind(ev.event_type)
+                    .push_bind(ev.job_id.as_deref());
+            });
+            qb.build().execute(&self.pool).await.map_err(map_sqlx_err)?;
+        }
+        Ok(u64::try_from(total).unwrap_or(u64::MAX))
+    }
+
     async fn db_health_snapshot(&self) -> Vec<(&'static str, f64)> {
         // Source everything from the server, not sqlx's pool counters —
         // `pg_stat_activity` is the canonical view of who's connected
@@ -1242,6 +1288,7 @@ impl PostgresStorage {
                         .unwrap_or_else(|_| chrono::Duration::seconds(60));
                 append_error_and_update(
                     &self.pool,
+                    &self.events,
                     job_id,
                     now,
                     &message,
@@ -1253,8 +1300,18 @@ impl PostgresStorage {
                 .await
             }
             FinalizeOutcome::Dead { message } => {
-                append_error_and_update(&self.pool, job_id, now, &message, true, None, None, owner)
-                    .await
+                append_error_and_update(
+                    &self.pool,
+                    &self.events,
+                    job_id,
+                    now,
+                    &message,
+                    true,
+                    None,
+                    None,
+                    owner,
+                )
+                .await
             }
         }
     }
@@ -1288,21 +1345,26 @@ impl PostgresStorage {
             q = q.bind(pid);
         }
         let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
-        if let Some(r) = row {
+        // Cool-down clear is queue *state* — stays in the tx. The
+        // `completed` event is buffered, pushed after commit.
+        let pending = if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
+            clear_queue_cooldown(&mut *tx, &queue_name, now).await?;
+            Some(EventRecord::new(
                 now,
-                &kind,
-                &queue_name,
+                kind,
+                queue_name,
                 Some(job_id.as_str()),
                 "completed",
-            )
-            .await?;
-            clear_queue_cooldown(&mut *tx, &queue_name, now).await?;
-        }
+            ))
+        } else {
+            None
+        };
         tx.commit().await.map_err(map_sqlx_err)?;
+        if let Some(ev) = pending {
+            self.events.push(ev);
+        }
         Ok(())
     }
 
@@ -1340,23 +1402,28 @@ impl PostgresStorage {
             q = q.bind(pid);
         }
         let row = q.fetch_optional(&mut *tx).await.map_err(map_sqlx_err)?;
-        if let Some(r) = row {
+        // Cool-down extension is queue state — stays in the tx. The
+        // `retried` event is buffered, pushed after commit.
+        let pending = if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
-                now,
-                &kind,
-                &queue_name,
-                Some(job_id.as_str()),
-                "retried",
-            )
-            .await?;
             if cool_down_queue {
                 extend_queue_cooldown(&mut *tx, &queue_name, next, now).await?;
             }
-        }
+            Some(EventRecord::new(
+                now,
+                kind,
+                queue_name,
+                Some(job_id.as_str()),
+                "retried",
+            ))
+        } else {
+            None
+        };
         tx.commit().await.map_err(map_sqlx_err)?;
+        if let Some(ev) = pending {
+            self.events.push(ev);
+        }
         Ok(())
     }
 }
@@ -1874,6 +1941,7 @@ async fn enqueue_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     req: &EnqueueRequest,
     new_id: &str,
+    pending: &mut Vec<EventRecord>,
 ) -> Result<EnqueueOutcome> {
     let queue = req
         .queue_name
@@ -1953,42 +2021,16 @@ async fn enqueue_in_tx(
         ));
     }
 
-    record_event(
-        &mut **tx,
+    // Buffer the `enqueued` event; the caller pushes it after the tx
+    // commits, so a rolled-back insert leaves no orphan event.
+    pending.push(EventRecord::new(
         now,
         req.kind.as_ref(),
         queue,
         Some(&id),
         "enqueued",
-    )
-    .await?;
+    ));
     Ok(EnqueueOutcome::Enqueued(JobId::new(id)))
-}
-
-async fn record_event<'e, E>(
-    executor: E,
-    at: DateTime<Utc>,
-    kind: &str,
-    queue_name: &str,
-    job_id: Option<&str>,
-    event_type: &str,
-) -> Result<()>
-where
-    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
-{
-    sqlx::query(
-        r"INSERT INTO queue_event (at, kind, queue_name, event_type, job_id)
-          VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(at)
-    .bind(kind)
-    .bind(queue_name)
-    .bind(event_type)
-    .bind(job_id)
-    .execute(executor)
-    .await
-    .map_err(map_sqlx_err)?;
-    Ok(())
 }
 
 /// Open (or extend) the queue-wide throttle cool-down for one limiter
@@ -2072,6 +2114,7 @@ where
 )]
 async fn append_error_and_update(
     pool: &PgPool,
+    events: &EventBuffer,
     job_id: &JobId,
     now: DateTime<Utc>,
     message: &str,
@@ -2119,6 +2162,8 @@ async fn append_error_and_update(
         (None, None) => "",
     };
 
+    // Event buffered here, pushed only after the tx commits below.
+    let mut pending: Option<EventRecord> = None;
     if terminal {
         let sql = format!(
             "UPDATE sync_queue
@@ -2145,15 +2190,13 @@ async fn append_error_and_update(
         if let Some(r) = dead_row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
+            pending = Some(EventRecord::new(
                 now,
-                &kind,
-                &queue_name,
+                kind,
+                queue_name,
                 Some(job_id.as_str()),
                 "failed",
-            )
-            .await?;
+            ));
         }
     } else {
         let sql = format!(
@@ -2181,18 +2224,19 @@ async fn append_error_and_update(
         if let Some(r) = row {
             let kind: String = r.try_get("kind").map_err(map_sqlx_err)?;
             let queue_name: String = r.try_get("queue_name").map_err(map_sqlx_err)?;
-            record_event(
-                &mut *tx,
+            pending = Some(EventRecord::new(
                 now,
-                &kind,
-                &queue_name,
+                kind,
+                queue_name,
                 Some(job_id.as_str()),
                 "retried",
-            )
-            .await?;
+            ));
         }
     }
     tx.commit().await.map_err(map_sqlx_err)?;
+    if let Some(ev) = pending {
+        events.push(ev);
+    }
     Ok(())
 }
 

@@ -350,6 +350,8 @@ async fn retry_cycle_emits_balanced_events() {
         .finalize(&id, None, FinalizeOutcome::Done)
         .await
         .unwrap();
+    // Events are buffered off the hot path; flush to read them back.
+    b.storage.flush_event_buffer().await.unwrap();
 
     let now = Utc::now();
     let events = b
@@ -391,6 +393,8 @@ async fn delete_cascades_to_queue_event_rows() {
         .finalize(&id, None, FinalizeOutcome::Done)
         .await
         .unwrap();
+    // Flush buffered events so the cascade-delete has rows to clear.
+    b.storage.flush_event_buffer().await.unwrap();
 
     let now = Utc::now();
     let pre = b

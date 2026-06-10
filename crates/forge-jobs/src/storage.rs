@@ -37,6 +37,7 @@ pub(crate) mod database_config;
 pub(crate) mod db_timing;
 #[allow(unreachable_pub)]
 pub(crate) mod error;
+mod event_buffer;
 #[allow(unreachable_pub)]
 pub(crate) mod paths;
 #[cfg(feature = "postgres")]
@@ -389,6 +390,17 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
     /// (test mocks don't need to instrument).
     fn drain_op_samples(&self) -> db_timing::DrainedSamples {
         db_timing::DrainedSamples::default()
+    }
+
+    /// Flush this adapter's buffered `queue_event` rows to storage.
+    /// Timeline events are buffered in-process (see
+    /// [`event_buffer`](crate::storage::event_buffer)) and written in
+    /// batches by the runtime's `event_flush_loop`, keeping them off the
+    /// hot enqueue / claim / finalize transactions. Called once per flush
+    /// tick and once more on graceful shutdown. Returns the number of
+    /// rows written. Default: no-op (test mocks buffer nothing).
+    async fn flush_event_buffer(&self) -> Result<u64> {
+        Ok(0)
     }
 
     /// DB-sourced health gauges to write this tick — `(metric_name,
