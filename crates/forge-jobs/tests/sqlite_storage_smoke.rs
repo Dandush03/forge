@@ -433,6 +433,64 @@ async fn requeue_batch_skips_dedupe_conflicts_instead_of_aborting() {
 }
 
 #[tokio::test]
+async fn requeue_single_skips_when_dedupe_sibling_is_active() {
+    // M4 (adapter parity): single-row `requeue` of a failed row whose
+    // dedupe_key already has an active sibling must be a no-op returning
+    // false — not trip the jq_dedupe UNIQUE index. SQLite uses `UPDATE OR
+    // IGNORE`; Postgres pre-filters with the index predicate. This proves
+    // the shared contract on the backend that runs locally.
+    let store = fresh().await;
+
+    // A: failed row with dedupe "kb".
+    let a = match store
+        .enqueue(
+            EnqueueRequest::new("noop_echo", json!({}))
+                .on_queue("gh")
+                .with_dedupe_key("kb"),
+        )
+        .await
+        .unwrap()
+    {
+        EnqueueOutcome::Enqueued(id) => id,
+        _ => unreachable!(),
+    };
+    store.claim_next("gh", "w-0").await.unwrap().unwrap();
+    store
+        .finalize(
+            &a,
+            None,
+            FinalizeOutcome::Failed {
+                retry_after: Duration::from_mins(1),
+                message: "x".into(),
+            },
+        )
+        .await
+        .unwrap();
+
+    // B: pending row reusing "kb" — now active again (A is failed).
+    let _b = store
+        .enqueue(
+            EnqueueRequest::new("noop_echo", json!({}))
+                .on_queue("gh")
+                .with_dedupe_key("kb"),
+        )
+        .await
+        .unwrap();
+
+    // Requeue A: B is an active sibling → skipped, false, A stays failed.
+    let requeued = store.requeue(&a).await.unwrap();
+    assert!(
+        !requeued,
+        "requeue is skipped when an active sibling exists"
+    );
+    assert_eq!(
+        store.get_job(&a).await.unwrap().unwrap().status,
+        JobStatus::Failed,
+        "conflicting row left as failed, not error"
+    );
+}
+
+#[tokio::test]
 async fn claim_next_skips_failed_when_dedupe_sibling_is_active() {
     // Without the claim-time pre-filter, the worker would pick the failed
     // row (older id), try to flip 'failed' → 'in_progress', trip jq_dedupe
