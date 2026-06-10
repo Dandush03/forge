@@ -15,8 +15,50 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # ── Which crates changed? ────────────────────────────────────────────
+  # Each per-crate job below only runs when that crate (or something it
+  # depends on, or a workspace-wide file) changed. A change to the root
+  # Cargo.toml / Cargo.lock / this workflow fans out to every crate.
+  changes:
+    name: detect changed crates
+    runs-on: ubuntu-latest
+    outputs:
+      forge-charts: ${{ steps.filter.outputs.forge-charts }}
+      forge-jobs: ${{ steps.filter.outputs.forge-jobs }}
+      forge-jobs-api: ${{ steps.filter.outputs.forge-jobs-api }}
+      forge-jobs-ui: ${{ steps.filter.outputs.forge-jobs-ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # `*workspace` expands the shared list into each crate's filter
+          # (dorny/paths-filter flattens nested sequences). Downstream
+          # crates also list their upstream paths so a dependency change
+          # re-tests the dependents.
+          filters: |
+            workspace: &workspace
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/ci.yml'
+            forge-charts:
+              - *workspace
+              - 'crates/forge-charts/**'
+            forge-jobs:
+              - *workspace
+              - 'crates/forge-jobs/**'
+            forge-jobs-api:
+              - *workspace
+              - 'crates/forge-jobs/**'
+              - 'crates/forge-jobs-api/**'
+            forge-jobs-ui:
+              - *workspace
+              - 'crates/forge-charts/**'
+              - 'crates/forge-jobs-ui/**'
+
+  # ── Global: formatting (cheap, whole-workspace) ──────────────────────
   fmt:
-    name: rustfmt
+    name: rustfmt (workspace)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,77 +67,147 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
-  clippy:
-    name: clippy (workspace, default features)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-
-  clippy-postgres:
-    name: clippy (forge-jobs, --features postgres)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      # Postgres adapter compiles, but its integration tests need a
-      # running Docker daemon for testcontainers — skip those in CI for
-      # now. This still type-checks the adapter against the trait
-      # surface so a feature-gated bit-rot can't sneak in.
-      - run: cargo clippy -p forge-jobs --features postgres --all-targets -- -D warnings
-
-  test:
-    name: test (workspace, default features)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --no-fail-fast
-
-  doc:
-    name: rustdoc (workspace, --features postgres)
+  # ── forge-charts ─────────────────────────────────────────────────────
+  forge-charts:
+    name: forge-charts
+    needs: changes
+    if: needs.changes.outputs.forge-charts == 'true'
     runs-on: ubuntu-latest
     env:
-      # Any unresolved intra-doc link or broken codeblock fails CI.
-      # Catches regressions before they render as broken on docs.rs.
       RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --no-deps --features postgres
+      - name: clippy
+        run: cargo clippy -p forge-charts --all-targets -- -D warnings
+      - name: clippy (wasm32)
+        run: cargo clippy -p forge-charts --target wasm32-unknown-unknown -- -D warnings
+      - name: test
+        run: cargo test -p forge-charts
+      - name: wasm32 build
+        run: cargo build -p forge-charts --target wasm32-unknown-unknown
+      - name: rustdoc
+        run: cargo doc -p forge-charts --no-deps
+      - name: package (tarball smoke)
+        run: cargo package -p forge-charts --allow-dirty
 
-  wasm:
-    name: wasm32 build (forge-charts, forge-jobs-ui)
+  # ── forge-jobs (incl. Postgres adapter against a service container) ──
+  forge-jobs:
+    name: forge-jobs
+    needs: changes
+    if: needs.changes.outputs.forge-jobs == 'true'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    env:
+      RUSTDOCFLAGS: -D warnings
+      # External-DB mode: the postgres integration tests connect to the
+      # service above and create/drop a unique database per test (instead
+      # of spinning a testcontainers container per test). See the test
+      # harness `bootstrap_external`.
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      # Both Leptos crates must compile cleanly for the WASM target —
-      # they're the consumer-facing CSR libs.
-      - run: cargo build -p forge-charts -p forge-jobs-ui --target wasm32-unknown-unknown
+      - name: clippy (default / sqlite)
+        run: cargo clippy -p forge-jobs --all-targets -- -D warnings
+      - name: clippy (--features postgres)
+        run: cargo clippy -p forge-jobs --features postgres --all-targets -- -D warnings
+      - name: test (default / sqlite)
+        run: cargo test -p forge-jobs
+      - name: test (--features postgres, against service)
+        run: cargo test -p forge-jobs --features postgres
+      - name: rustdoc (--features postgres)
+        run: cargo doc -p forge-jobs --no-deps --features postgres
+      - name: package (tarball smoke)
+        run: cargo package -p forge-jobs --allow-dirty
 
-  package:
-    name: cargo package (tarball smoke test)
+  # ── forge-jobs-api (depends on forge-jobs) ───────────────────────────
+  forge-jobs-api:
+    name: forge-jobs-api
+    needs: changes
+    if: needs.changes.outputs.forge-jobs-api == 'true'
     runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
-      # Only the two independent crates can dry-run pre-first-publish —
-      # the downstream ones need their sibling on the registry first.
-      # This catches manifest issues (missing fields, oversized tarballs)
-      # before they bite a `cargo publish` invocation.
-      - run: cargo package -p forge-charts --allow-dirty
-      - run: cargo package -p forge-jobs --allow-dirty
+      - name: clippy
+        run: cargo clippy -p forge-jobs-api --all-targets -- -D warnings
+      - name: clippy (--features postgres)
+        run: cargo clippy -p forge-jobs-api --features postgres --all-targets -- -D warnings
+      - name: test
+        run: cargo test -p forge-jobs-api
+      - name: rustdoc
+        run: cargo doc -p forge-jobs-api --no-deps
+
+  # ── forge-jobs-ui (Leptos CSR; depends on forge-charts) ──────────────
+  forge-jobs-ui:
+    name: forge-jobs-ui
+    needs: changes
+    if: needs.changes.outputs.forge-jobs-ui == 'true'
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy
+        run: cargo clippy -p forge-jobs-ui --all-targets -- -D warnings
+      - name: clippy (wasm32)
+        run: cargo clippy -p forge-jobs-ui --target wasm32-unknown-unknown -- -D warnings
+      - name: test
+        run: cargo test -p forge-jobs-ui
+      - name: wasm32 build
+        run: cargo build -p forge-jobs-ui --target wasm32-unknown-unknown
+      - name: rustdoc
+        run: cargo doc -p forge-jobs-ui --no-deps
+
+  # ── Single required status check ─────────────────────────────────────
+  # Branch protection can require just `ci-ok`: it passes when every
+  # crate job either succeeded or was skipped (its crate didn't change),
+  # and fails if any actually failed or was cancelled.
+  ci-ok:
+    name: CI passed
+    if: always()
+    needs: [fmt, forge-charts, forge-jobs, forge-jobs-api, forge-jobs-ui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "job results: $results"
+          for r in $results; do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "::error::a required job did not pass ($r)"
+              exit 1
+            fi
+          done
+          echo "all required jobs passed or were skipped"
