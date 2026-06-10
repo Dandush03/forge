@@ -94,6 +94,22 @@ pub struct StorageInfo {
     pub fields: Vec<(String, String)>,
 }
 
+/// What a [`JobQueue::heartbeat_job`] tick tells the worker to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HeartbeatStatus {
+    /// Row is still `in_progress` and owned by this process; carry on.
+    Active,
+    /// Still ours, but a cancel was requested (via [`JobQueue::delete`]
+    /// on the in-progress row). The worker signals its cancel token.
+    CancelRequested,
+    /// The row is no longer ours — it vanished, or it was reaped past the
+    /// stale threshold and re-claimed by another worker. The worker stops
+    /// running the job: continuing would duplicate work the new owner now
+    /// holds.
+    Lost,
+}
+
 // ────────────────────────────────────────────────────────────────────
 // JobQueue — the queue of jobs proper.
 // ────────────────────────────────────────────────────────────────────
@@ -144,14 +160,20 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
         outcome: FinalizeOutcome,
     ) -> Result<()>;
 
-    /// Update `heartbeat_at` on an in-flight job. Called periodically
-    /// by the worker's heartbeat side-task so long handlers don't trip
-    /// the reaper.
-    /// Touch the row's `heartbeat_at` and return whether a cancel
-    /// has been requested for this job (via [`Self::delete`] on an
-    /// in-progress row). Workers' heartbeat side-task uses the
-    /// returned bool to signal the per-job cancel token.
-    async fn heartbeat_job(&self, job_id: &JobId, process_id: &str) -> Result<bool>;
+    /// Touch the in-flight row's `heartbeat_at` and report what the
+    /// worker should do next. The heartbeat UPDATE is scoped to `id =
+    /// job_id AND process_id = process_id`, so it doubles as an ownership
+    /// probe:
+    ///
+    /// - [`HeartbeatStatus::Active`] — still ours, run on.
+    /// - [`HeartbeatStatus::CancelRequested`] — still ours, but a cancel
+    ///   was requested via [`Self::delete`] on the in-progress row; the
+    ///   worker signals its per-job cancel token.
+    /// - [`HeartbeatStatus::Lost`] — the row is no longer ours (it
+    ///   vanished, or it was reaped past the stale threshold and another
+    ///   worker re-claimed it). The worker stops running the job; the new
+    ///   owner holds it now.
+    async fn heartbeat_job(&self, job_id: &JobId, process_id: &str) -> Result<HeartbeatStatus>;
 
     /// Find `in_progress` rows whose `heartbeat_at` is older than
     /// `stale_before` and revive them as a `Failed` outcome (so

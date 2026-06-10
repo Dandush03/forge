@@ -49,8 +49,8 @@ use super::types::{
     QueueCounts, TimelineEvent, TimelineEventType, metric,
 };
 use super::{
-    CronStorage, ERROR_HISTORY_CAP, JobQueue, ProcessRegistry, QueueConfig, RateLimitOutcome,
-    RateLimitStorage, StorageInfo,
+    CronStorage, ERROR_HISTORY_CAP, HeartbeatStatus, JobQueue, ProcessRegistry, QueueConfig,
+    RateLimitOutcome, RateLimitStorage, StorageInfo,
 };
 
 pub struct PostgresStorage {
@@ -325,11 +325,11 @@ impl JobQueue for PostgresStorage {
         self.do_finalize(job_id, owner, outcome).await
     }
 
-    async fn heartbeat_job(&self, job_id: &JobId, process_id: &str) -> Result<bool> {
+    async fn heartbeat_job(&self, job_id: &JobId, process_id: &str) -> Result<HeartbeatStatus> {
         let _t = OpTimer::write(&self.db_recorder);
         // RETURNING tells us if a cancel was requested for this
-        // (still-owned) row. 0 rows back = row vanished or
-        // process_id no longer owns it; both treated as "no cancel."
+        // (still-owned) row. 0 rows back = row vanished or process_id no
+        // longer owns it (reaped + re-claimed) → `Lost` (M1).
         let row = sqlx::query(
             r"UPDATE sync_queue
                  SET heartbeat_at = $1
@@ -342,10 +342,13 @@ impl JobQueue for PostgresStorage {
         .fetch_optional(&self.pool)
         .await
         .map_err(map_sqlx_err)?;
-        let cancel_requested = row
-            .as_ref()
-            .is_some_and(|r| r.try_get::<bool, _>("cancel_requested").unwrap_or(false));
-        Ok(cancel_requested)
+        Ok(row.map_or(HeartbeatStatus::Lost, |r| {
+            if r.try_get::<bool, _>("cancel_requested").unwrap_or(false) {
+                HeartbeatStatus::CancelRequested
+            } else {
+                HeartbeatStatus::Active
+            }
+        }))
     }
 
     async fn revive_stale(&self, stale_before: DateTime<Utc>) -> Result<u64> {
@@ -1955,7 +1958,8 @@ where
 /// `last_error`, and transition status. Same shape as the `SQLite` tree.
 #[allow(
     clippy::too_many_lines,
-    reason = "one cohesive read-modify-write of error_history + the status transition; the terminal/non-terminal arms are inherent and splitting hurts readability"
+    clippy::too_many_arguments,
+    reason = "one cohesive read-modify-write of error_history + the status transition; the terminal/non-terminal arms are inherent and splitting hurts readability. The two mutually-exclusive guard params (owner / stale) are the cost of sharing this between the finalize and reaper paths"
 )]
 async fn append_error_and_update(
     pool: &PgPool,

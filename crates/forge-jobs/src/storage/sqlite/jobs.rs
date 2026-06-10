@@ -23,13 +23,13 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use sqlx::{Row, Sqlite, Transaction};
 
 use super::{READ_POOL_MAX, SqliteStorage, WRITE_POOL_MAX, map_sqlx_err};
-use crate::storage::JobQueue;
 use crate::storage::db_timing::OpTimer;
 use crate::storage::error::{Result, StorageError};
 use crate::storage::types::{
     EnqueueOutcome, EnqueueRequest, ErrorHistoryEntry, FinalizeOutcome, JobId, JobLatency,
     JobRecord, JobStatus, MetricBucket, QueueCounts, TimelineEvent, TimelineEventType, metric,
 };
+use crate::storage::{HeartbeatStatus, JobQueue};
 
 use crate::storage::ERROR_HISTORY_CAP;
 
@@ -196,12 +196,12 @@ impl JobQueue for SqliteStorage {
         .await
     }
 
-    async fn heartbeat_job(&self, job_id: &JobId, process_id: &str) -> Result<bool> {
+    async fn heartbeat_job(&self, job_id: &JobId, process_id: &str) -> Result<HeartbeatStatus> {
         let _t = OpTimer::write(&self.db_recorder);
         let now = iso(Utc::now());
-        // UPDATE … RETURNING is supported in SQLite >= 3.35. Returns
-        // 0 rows when the row vanished or the process_id no longer
-        // owns it (re-claimed) — both treated as "no cancel."
+        // UPDATE … RETURNING is supported in SQLite >= 3.35. 0 rows means
+        // the row vanished or the process_id no longer owns it (reaped +
+        // re-claimed) → `Lost` (M1). 1 row → Active / CancelRequested.
         let row = sqlx::query(
             r"UPDATE sync_queue
                  SET heartbeat_at = ?1
@@ -214,11 +214,15 @@ impl JobQueue for SqliteStorage {
         .fetch_optional(&self.write_pool)
         .await
         .map_err(map_sqlx_err)?;
-        let cancel_requested = row.as_ref().is_some_and(|r| {
-            r.try_get::<i64, _>("cancel_requested")
+        Ok(row.map_or(HeartbeatStatus::Lost, |r| {
+            if r.try_get::<i64, _>("cancel_requested")
                 .is_ok_and(|n| n != 0)
-        });
-        Ok(cancel_requested)
+            {
+                HeartbeatStatus::CancelRequested
+            } else {
+                HeartbeatStatus::Active
+            }
+        }))
     }
 
     async fn revive_stale(&self, stale_before: DateTime<Utc>) -> Result<u64> {
@@ -1440,7 +1444,8 @@ const fn active_status_placeholders() -> &'static str {
 /// supplied `next_scheduled_at`.
 #[allow(
     clippy::too_many_lines,
-    reason = "one cohesive read-modify-write of error_history + the status transition; the terminal/non-terminal arms are inherent and splitting hurts readability"
+    clippy::too_many_arguments,
+    reason = "one cohesive read-modify-write of error_history + the status transition; the terminal/non-terminal arms are inherent and splitting hurts readability. The two mutually-exclusive guard params (owner / stale) are the cost of sharing this between the finalize and reaper paths"
 )]
 async fn append_error_and_update(
     pool: &sqlx::SqlitePool,

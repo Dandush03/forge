@@ -52,6 +52,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 use ulid::Ulid;
 
+use crate::storage::HeartbeatStatus;
 use crate::storage::Storage;
 use crate::storage::error::Result;
 use crate::storage::types::{
@@ -862,7 +863,7 @@ async fn heartbeat_loop(
             () = stop.cancelled() => return,
             _ = tick.tick() => {
                 match storage.jobs.heartbeat_job(&job_id, &process_id).await {
-                    Ok(true) if !cancel_signalled => {
+                    Ok(HeartbeatStatus::CancelRequested) if !cancel_signalled => {
                         // First observation of the DB cancel flag.
                         // Signal the handler; keep ticking so the
                         // row's heartbeat_at stays fresh while the
@@ -871,6 +872,21 @@ async fn heartbeat_loop(
                             job_id = %job_id.as_str(),
                             %process_id,
                             "heartbeat: cancel requested; signalling handler"
+                        );
+                        job_cancel.cancel();
+                        cancel_signalled = true;
+                    }
+                    Ok(HeartbeatStatus::Lost) if !cancel_signalled => {
+                        // M1: we no longer own this row — it was reaped
+                        // past the stale threshold and another worker
+                        // re-claimed it. Stop running so the same job
+                        // isn't executing on two workers at once; the
+                        // new owner holds it now. Our eventual finalize
+                        // is a no-op under the H1 ownership guard.
+                        tracing::warn!(
+                            job_id = %job_id.as_str(),
+                            %process_id,
+                            "heartbeat: lost row ownership (reaped + re-claimed); stopping handler"
                         );
                         job_cancel.cancel();
                         cancel_signalled = true;

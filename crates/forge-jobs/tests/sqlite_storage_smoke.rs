@@ -23,8 +23,8 @@ use std::time::Duration;
 use chrono::Utc;
 use forge_jobs::SqliteStorage;
 use forge_jobs::storage::{
-    CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue, JobStatus,
-    NewCronSchedule, ProcessRegistry, QueueConfig,
+    CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, HeartbeatStatus, JobQueue,
+    JobStatus, NewCronSchedule, ProcessRegistry, QueueConfig,
 };
 use serde_json::json;
 
@@ -1336,9 +1336,10 @@ async fn delete_in_progress_sets_cancel_flag_and_keeps_row() {
     assert_eq!(job.status, JobStatus::InProgress);
 
     // Heartbeat picks up the cancel flag.
-    let cancel_requested = s.heartbeat_job(&id, "w-0").await.unwrap();
-    assert!(
-        cancel_requested,
+    let status = s.heartbeat_job(&id, "w-0").await.unwrap();
+    assert_eq!(
+        status,
+        HeartbeatStatus::CancelRequested,
         "heartbeat_job must surface the cancel flag set by delete"
     );
 }
@@ -1396,9 +1397,10 @@ async fn claim_next_clears_stale_cancel_flag_from_previous_attempt() {
 
     // Re-claim — cancel flag must be NULL on the new attempt.
     let _ = s.claim_next("gh", "w-1").await.unwrap().unwrap();
-    let cancel_requested = s.heartbeat_job(&id, "w-1").await.unwrap();
-    assert!(
-        !cancel_requested,
+    let status = s.heartbeat_job(&id, "w-1").await.unwrap();
+    assert_eq!(
+        status,
+        HeartbeatStatus::Active,
         "claim_next must clear cancel_requested_at from previous attempts"
     );
 }
