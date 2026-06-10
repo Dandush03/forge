@@ -205,6 +205,32 @@ reproducibility during this window.
 - **Just want the chart library?** `forge-charts` is independent. No
   jobs/queue dependency.
 
+## How it compares
+
+A like-for-like benchmark against Sidekiq (Ruby/Redis) and solid_queue
+(Rails/Postgres), all on one internal Docker network, 8-way concurrency,
+no-op jobs. Full method + caveats in [docs/benchmarks.md](docs/benchmarks.md);
+treat these as *relative* (single machine, default tuning).
+
+| | Pickup p50 | End-to-end p50 | Throughput | Worker RSS |
+|---|---|---|---|---|
+| **Sidekiq** (Redis) | 0.47 ms | 0.71 ms | ~7.5–15k/s | 49 MiB |
+| **forge-jobs** (Postgres) | 1.4 ms | 2.0 ms | ~2,000/s | **13 MiB** |
+| **solid_queue** (Postgres) | 62.7 ms | 65.2 ms | ~200/s | 238 MiB |
+
+Reading it honestly:
+
+- **vs solid_queue** (the closest peer — both durable Postgres): forge is
+  **~45× lower pickup latency** (push via `LISTEN/NOTIFY` vs polling),
+  ~30× lower end-to-end, and ~10× higher throughput.
+- **vs Sidekiq:** Redis/in-memory is faster — that's physics. forge's trade
+  is *durable, transactional-with-your-data* jobs at push-driven
+  single-digit-ms latency far closer to Redis than to a polling DB queue.
+- **Worker footprint:** the Rust worker is **13 MiB** RSS — ~4× leaner than
+  Sidekiq's Ruby worker, ~18× leaner than solid_queue's Rails worker.
+  (Per-job CPU is comparable across all three — the measurable
+  compiled-language win here is memory, not CPU.)
+
 ## Running on Postgres at scale
 
 The embedded SQLite defaults are tuned for the single-process /
