@@ -205,6 +205,17 @@ reproducibility during this window.
 - **Just want the chart library?** `forge-charts` is independent. No
   jobs/queue dependency.
 
+## Running on Postgres at scale
+
+The embedded SQLite defaults are tuned for the single-process /
+desktop case. Before pointing a multi-replica cluster or a
+high-throughput workload at the Postgres backend, read
+[docs/operating-at-scale.md](docs/operating-at-scale.md) — it covers the
+backend-choice threshold, the vacuum/bloat tuning (and how to apply
+`fillfactor` to an already-populated table), connection-pool sizing, the
+single-coordinator background-work ceiling, and rate-limit-scope
+contention.
+
 ## Repository layout
 
 ```
