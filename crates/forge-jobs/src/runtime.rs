@@ -650,7 +650,15 @@ async fn worker_loop(
         // this path is rare (only on failure / throttle) and matches
         // the supervisor's per-tick config read.
         let backoff_cfg = fetch_backoff_cfg(&storage, &queue_name).await;
-        let finalize_outcome = if user_cancelled {
+        // M2: a cancel that lands while (or just after) the handler
+        // already returned `Done` must NOT rewrite the row as Dead — the
+        // work happened (e-mail sent, API call committed), and recording
+        // it "cancelled by user" invites an operator retry that genuinely
+        // double-executes it. The cancel simply arrived too late. The
+        // Dead-on-cancel override only applies to non-`Done` outcomes,
+        // where it prevents a backoff-off queue immediately re-claiming
+        // and re-running the row the user asked to stop.
+        let finalize_outcome = if user_cancelled && !matches!(outcome, JobOutcome::Done) {
             FinalizeOutcome::Dead {
                 message: "cancelled by user".to_owned(),
             }
