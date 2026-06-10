@@ -25,13 +25,14 @@
 //! connection costs ~10 MB server-side, so connect-pooler bouncers like
 //! `PgBouncer` pay off above ~50 replicas (see Phase 4.3 docs).
 //!
-//! Note: `wait_for_work` borrows a *dedicated* connection (via
-//! `PgListener`) for its lifetime, in addition to the pool's
-//! connections used for the inline SQL. With N idle workers, you'll
-//! see N listener connections on top of the pool's queued claim/finalize
-//! work. Size the pool accordingly: at `max_workers=N` per replica,
-//! budget for `~N` listener connections + ~5-10 pool connections.
+//! Note: a single process-wide listener task holds **one** dedicated
+//! `PgListener` connection for the lifetime of the storage handle, and
+//! fans `NOTIFY` wakes out to an in-process per-queue [`tokio::sync::Notify`]
+//! hub. `wait_for_work` blocks on that in-process notify — it does NOT
+//! open a connection per call. So a replica's listener footprint is one
+//! connection total, independent of idle-worker count.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,7 +40,15 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use sqlx::Row;
 use sqlx::postgres::{PgListener, PgPool, PgPoolOptions};
+use tokio::sync::{Notify, RwLock};
 use tokio_util::sync::CancellationToken;
+
+/// Single Postgres channel every replica's enqueue `NOTIFY`s and the
+/// process listener `LISTEN`s on. The woken queue's name rides in the
+/// notification payload (bound via `pg_notify($1, $2)`, so no identifier
+/// escaping is needed), and the listener routes it to that queue's
+/// in-process [`Notify`].
+const WAKE_CHANNEL: &str = "forge_jobs_wake";
 
 use super::db_timing::{DbRecorder, OpTimer};
 use super::error::{Result, StorageError};
@@ -52,6 +61,31 @@ use super::{
     CronStorage, ERROR_HISTORY_CAP, HeartbeatStatus, JobQueue, ProcessRegistry, QueueConfig,
     RateLimitOutcome, RateLimitStorage, StorageInfo,
 };
+
+/// In-process per-queue wake registry. The single listener task signals
+/// the right queue's `Notify` when a `NOTIFY` arrives; `wait_for_work`
+/// blocks on it. `notify_one` (not `notify_waiters`) so a wake that races
+/// all-workers-busy still stores a permit for the next waiter — same
+/// no-lost-wakeup rationale as the `SQLite` `NotifyHub`.
+#[derive(Default)]
+struct WakeHub {
+    queues: RwLock<HashMap<String, Arc<Notify>>>,
+}
+
+impl WakeHub {
+    async fn for_queue(&self, name: &str) -> Arc<Notify> {
+        // Drop the read guard before taking the write lock (clippy's
+        // significant_drop_in_scrutinee) — mirrors the SQLite hub.
+        let cached = self.queues.read().await.get(name).cloned();
+        if let Some(n) = cached {
+            return n;
+        }
+        let mut w = self.queues.write().await;
+        w.entry(name.to_owned())
+            .or_insert_with(|| Arc::new(Notify::new()))
+            .clone()
+    }
+}
 
 pub struct PostgresStorage {
     pool: PgPool,
@@ -67,6 +101,19 @@ pub struct PostgresStorage {
     /// Per-call latency buffer for the `db_op_ms` rollup. See
     /// [`super::db_timing`].
     db_recorder: Arc<DbRecorder>,
+    /// Per-queue in-process wake registry, fed by the listener task and
+    /// consumed by `wait_for_work` (H2).
+    wake: Arc<WakeHub>,
+    /// Cancels the background `LISTEN` task on `Drop` so a dropped
+    /// storage handle (e.g. a torn-down test container) doesn't leak its
+    /// listener connection.
+    listener_cancel: CancellationToken,
+}
+
+impl Drop for PostgresStorage {
+    fn drop(&mut self) {
+        self.listener_cancel.cancel();
+    }
 }
 
 impl std::fmt::Debug for PostgresStorage {
@@ -74,6 +121,49 @@ impl std::fmt::Debug for PostgresStorage {
         f.debug_struct("PostgresStorage")
             .field("max_connections", &self.max_connections)
             .finish_non_exhaustive()
+    }
+}
+
+/// Process-wide listener: hold one `PgListener`, `LISTEN` on the wake
+/// channel, and route each notification's payload (the queue name) to the
+/// in-process hub. Reconnects with a fixed backoff if the connection
+/// drops; exits when `cancel` fires (storage dropped).
+async fn listen_loop(pool: PgPool, wake: Arc<WakeHub>, cancel: CancellationToken) {
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        match run_listener(&pool, &wake, &cancel).await {
+            Ok(()) => return, // cancelled
+            Err(e) => {
+                tracing::warn!(?e, "pg notify listener dropped; reconnecting in 1s");
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => return,
+                    () = tokio::time::sleep(Duration::from_secs(1)) => {}
+                }
+            }
+        }
+    }
+}
+
+async fn run_listener(pool: &PgPool, wake: &WakeHub, cancel: &CancellationToken) -> Result<()> {
+    // `connect_with(pool)` opens a dedicated connection outside the pool's
+    // capacity, so the long-lived LISTEN never starves worker SQL.
+    let mut listener = PgListener::connect_with(pool).await.map_err(map_sqlx_err)?;
+    listener.listen(WAKE_CHANNEL).await.map_err(map_sqlx_err)?;
+    loop {
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Ok(()),
+            res = listener.recv() => {
+                let notification = res.map_err(map_sqlx_err)?;
+                let queue = notification.payload();
+                if !queue.is_empty() {
+                    wake.for_queue(queue).await.notify_one();
+                }
+            }
+        }
     }
 }
 
@@ -151,11 +241,24 @@ impl PostgresStorage {
                 message: e.to_string(),
             })?;
 
+        // H2: one process-wide LISTEN task feeding the in-process wake
+        // hub, instead of a dedicated listener connection per idle
+        // `wait_for_work` call. Cancelled on `Drop`.
+        let wake = Arc::new(WakeHub::default());
+        let listener_cancel = CancellationToken::new();
+        tokio::spawn(listen_loop(
+            pool.clone(),
+            wake.clone(),
+            listener_cancel.clone(),
+        ));
+
         Ok(Self {
             pool,
             max_connections,
             ulid_gen: Arc::new(tokio::sync::Mutex::new(ulid::Generator::new())),
             db_recorder: Arc::new(DbRecorder::default()),
+            wake,
+            listener_cancel,
         })
     }
 
@@ -978,42 +1081,30 @@ impl JobQueue for PostgresStorage {
     }
 
     async fn wait_for_work(&self, queue: &str, timeout: Duration) -> Result<bool> {
-        // `connect_with(&pool)` opens a dedicated `PgListener` connection
-        // using the pool's stored credentials but *outside* the pool's
-        // capacity — so a long LISTEN never starves the workers'
-        // SQL connections. Identical to `PgListener::connect(url)` but
-        // works regardless of how the pool was constructed (URL or
-        // `PgConnectOptions`).
-        let mut listener = PgListener::connect_with(&self.pool)
-            .await
-            .map_err(map_sqlx_err)?;
-        let channel = listen_channel(queue);
-        listener.listen(&channel).await.map_err(map_sqlx_err)?;
+        // H2: block on the in-process per-queue notify the process
+        // listener feeds — no per-call connection. A wake delivered while
+        // no waiter exists yet still leaves a permit (`notify_one`), and a
+        // missed wake is bounded by the caller's `timeout` (the runtime
+        // re-polls `claim_next` every `IDLE_POLL`), so correctness holds
+        // regardless of `NOTIFY` delivery timing.
+        let notify = self.wake.for_queue(queue).await;
         tokio::select! {
             biased;
-            res = listener.recv() => match res {
-                Ok(_notification) => Ok(true),
-                Err(e) => Err(map_sqlx_err(e)),
-            },
+            () = notify.notified() => Ok(true),
             () = tokio::time::sleep(timeout) => Ok(false),
         }
     }
 
     async fn notify(&self, queue: &str) -> Result<()> {
         let _t = OpTimer::write(&self.db_recorder);
-        let channel = listen_channel(queue);
-        // Use NOTIFY without a payload — workers only need the wake
-        // signal, not the job id (claim_next picks the highest
-        // priority row anyway).
-        //
-        // `escape_pg_ident` escapes any `"` in the channel so a
-        // hostile queue name can't break out of the quoted
-        // identifier. `LISTEN` (in `wait_for_work` above) goes
-        // through sqlx's `PgListener::listen` which does the same
-        // escape internally; this path builds raw SQL so we have to
-        // do it ourselves.
-        let sql = format!("NOTIFY \"{}\"", escape_pg_ident(&channel));
-        sqlx::query(&sql)
+        // Wake every replica's listener via one shared channel, carrying
+        // the queue name as the payload. `pg_notify($1, $2)` binds both
+        // args, so a hostile queue name can't inject — no manual
+        // identifier escaping needed. The listener routes the payload to
+        // that queue's in-process notify.
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(WAKE_CHANNEL)
+            .bind(queue)
             .execute(&self.pool)
             .await
             .map_err(map_sqlx_err)?;
@@ -2202,25 +2293,6 @@ fn row_to_cron(r: &sqlx::postgres::PgRow) -> Result<CronScheduleRecord> {
     })
 }
 
-/// LISTEN/NOTIFY channel name for a queue. Postgres channel names
-/// are identifiers (lowercase, digits, underscore). Our queue names
-/// already conform; this just adds a `q_` prefix so any future
-/// non-queue channels we want stay distinct.
-fn listen_channel(queue: &str) -> String {
-    format!("q_{queue}")
-}
-
-/// Escape an identifier for safe interpolation into a quoted
-/// Postgres identifier (`"…"`). Mirrors sqlx's internal `ident()`:
-/// truncate at the first NUL byte (PG identifiers can't contain
-/// NUL), then double any `"`. The caller wraps the result in
-/// `"..."`. Used by `notify()` to build the `NOTIFY "…"` statement
-/// safely even when the queue name contains hostile characters.
-fn escape_pg_ident(name: &str) -> String {
-    let truncated = name.find('\0').map_or(name, |i| &name[..i]);
-    truncated.replace('"', "\"\"")
-}
-
 // ────────────────────────────────────────────────────────────────────
 // RateLimitStorage — cluster-wide token-bucket budget.
 // ────────────────────────────────────────────────────────────────────
@@ -2310,50 +2382,5 @@ fn map_sqlx_err(e: sqlx::Error) -> StorageError {
             }
         }
         other => StorageError::Backend(other.to_string()),
-    }
-}
-
-#[cfg(test)]
-mod escape_tests {
-    use super::escape_pg_ident;
-
-    #[test]
-    fn plain_identifier_passes_through() {
-        assert_eq!(escape_pg_ident("q_default"), "q_default");
-    }
-
-    #[test]
-    fn double_quotes_are_doubled() {
-        assert_eq!(escape_pg_ident(r#"a"b"c"#), r#"a""b""c"#);
-    }
-
-    #[test]
-    fn injection_attempt_stays_inside_the_quoted_identifier() {
-        // A hostile queue name that tries to close the identifier
-        // and append SQL. After escaping, every `"` is doubled —
-        // PG's escape sequence for a literal `"` inside a quoted
-        // identifier. The wrapped form `"x""; DROP …"` is ONE
-        // identifier as far as the server is concerned (which it
-        // then rejects as unknown / too long), not statement-
-        // boundary SQL.
-        let hostile = r#"x"; DROP TABLE sync_queue; --"#;
-        let escaped = escape_pg_ident(hostile);
-        // Every original `"` (one of them) doubled → escaped has 2
-        // quote chars total. Even-count is the structural
-        // invariant: a closing `"` always has its escape partner.
-        let quote_count = escaped.chars().filter(|&c| c == '"').count();
-        assert!(
-            quote_count.is_multiple_of(2),
-            "escaping must produce paired quotes; got {quote_count} in {escaped:?}"
-        );
-        // Sanity: the original `"` survived as `""` (PG's literal-quote escape).
-        assert!(escaped.contains(r#""""#));
-    }
-
-    #[test]
-    fn nul_byte_truncates_identifier() {
-        // PG identifiers cannot contain NUL; sqlx truncates so we
-        // mirror that for predictability.
-        assert_eq!(escape_pg_ident("a\0b"), "a");
     }
 }
