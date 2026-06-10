@@ -773,6 +773,14 @@ impl JobQueue for PostgresStorage {
 
     async fn requeue(&self, job_id: &JobId) -> Result<bool> {
         let _t = OpTimer::write(&self.db_recorder);
+        // M4: skip the requeue if this row's dedupe_key already has an
+        // active (pending/in_progress) sibling — flipping it to pending
+        // would trip the `jq_dedupe` UNIQUE partial index and surface as
+        // a 500. SQLite uses `UPDATE OR IGNORE`; Postgres has no such
+        // clause, so we pre-filter with the index's own predicate (same
+        // shape as `requeue_batch_by_status`). A NULL key is always
+        // requeueable. 0 rows changed → caller sees "not requeued",
+        // matching the SQLite adapter.
         let res = sqlx::query(
             r"UPDATE sync_queue
                  SET status       = 'pending',
@@ -780,7 +788,13 @@ impl JobQueue for PostgresStorage {
                      completed_at = NULL,
                      process_id   = NULL,
                      heartbeat_at = NULL
-               WHERE id = $2 AND status IN ('failed', 'dead')",
+               WHERE id = $2 AND status IN ('failed', 'dead')
+                 AND (dedupe_key IS NULL OR NOT EXISTS (
+                       SELECT 1 FROM sync_queue dup
+                        WHERE dup.dedupe_key = sync_queue.dedupe_key
+                          AND dup.id != sync_queue.id
+                          AND dup.status IN ('pending', 'in_progress')
+                     ))",
         )
         .bind(Utc::now())
         .bind(job_id.as_str())
