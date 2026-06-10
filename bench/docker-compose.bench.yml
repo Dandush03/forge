@@ -1,0 +1,75 @@
+# Cross-system queue benchmark, all on ONE internal Docker network so every
+# measurement traverses the same container-to-container bridge (no
+# host↔VM-proxy hop skewing one system). Datastores stay up; each load
+# runner is invoked one at a time via `docker-compose run` so they never
+# contend:
+#
+#   docker-compose -f docker-compose.bench.yml up -d postgres redis
+#   docker-compose -f docker-compose.bench.yml run --rm -e LOADGEN_PROBE=1 forge
+#   docker-compose -f docker-compose.bench.yml run --rm sidekiq probe
+#   docker-compose -f docker-compose.bench.yml run --rm solidq probe
+#
+# Services reach the datastores by compose service name (postgres, redis).
+name: forge-bench
+
+services:
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - pg_data:/var/lib/postgresql # PG 18+ data-dir layout (mount the parent)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # forge-jobs loadgen (Rust), talking to postgres over the internal network.
+  forge:
+    build:
+      context: .. # repo root (bench/ lives in the repo) — needs crates/ + Cargo.{toml,lock}
+      dockerfile: bench/forge.Dockerfile
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Sidekiq (Ruby) on Redis. `run --rm sidekiq probe|throughput`.
+  sidekiq:
+    build:
+      context: .
+      dockerfile: sidekiq.Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # solid_queue (Rails 8) on the same Postgres. `run --rm solidq probe|throughput`.
+  solidq:
+    build:
+      context: ./solidq_app
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+      RAILS_ENV: development
+      # solid_queue refuses to start if worker threads > DB pool; keep the
+      # pool comfortably above SQ_THREADS (default 8) + its dispatcher.
+      RAILS_MAX_THREADS: 16
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pg_data:
