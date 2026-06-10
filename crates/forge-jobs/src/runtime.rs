@@ -83,6 +83,20 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 /// Reaper tick cadence.
 pub const REAPER_TICK: Duration = Duration::from_secs(15);
 /// Jobs / processes with heartbeat older than this are reaped.
+///
+/// L5 — clock domain: the staleness horizon is computed as
+/// `Utc::now() - STALE_THRESHOLD` from the **runtime (app) clock** and
+/// passed as an absolute instant to `revive_stale` / `reap_stale` /
+/// `list_live_pods`. The cron/coordinator lease, by contrast, compares
+/// and writes with the **DB clock** (`now()`) on both sides, so it's
+/// internally consistent. On a single-process `SQLite` deploy these are
+/// the same clock. On a multi-replica Postgres deploy they differ by the
+/// app↔DB skew: a replica whose clock runs behind could briefly look
+/// stale to the leader (and be trimmed from the live-pod set) and
+/// self-heal on the next heartbeat. The 60s threshold is >> realistic
+/// NTP-synced skew, so this is a documented assumption, not a live bug;
+/// moving the horizons into SQL (`now() - interval`) would unify the
+/// domain if a deploy ever runs with looser clocks.
 const STALE_THRESHOLD: ChronoDuration = ChronoDuration::seconds(60);
 /// Retention cleanup cadence.
 pub const CLEANUP_TICK: Duration = Duration::from_mins(5);
