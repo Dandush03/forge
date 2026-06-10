@@ -1,0 +1,46 @@
+# Local Postgres for forge-jobs integration tests and for running the
+# reference jobs-server against a real cluster backend.
+#
+# Run the Postgres integration tests against it (each test creates and
+# drops its own `forge_test_*` database, so parallel tests stay isolated):
+#
+#     docker compose up -d postgres
+#     TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres \
+#       cargo test -p forge-jobs --features postgres
+#
+# Run the jobs-server against it:
+#
+#     docker compose up -d postgres
+#     QUEUE_BACKEND=postgres \
+#     DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/postgres \
+#       cargo run -p forge-jobs-api --features postgres --bin jobs-server
+#
+# Reset everything (drops the volume, including any leaked test DBs):
+#
+#     docker compose down -v
+#
+# Port 5433 on the host avoids clashing with a local Postgres on 5432.
+
+services:
+  postgres:
+    image: postgres:latest
+    # Matches the credentials the tests / examples above use. This is a
+    # throwaway local dev database — not for anything that leaves your box.
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - forge_pg_data:/var/lib/postgresql/data
+    # `cargo test` / the server should wait for a ready DB; the healthcheck
+    # lets `docker compose up --wait` block until Postgres accepts queries.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  forge_pg_data:
