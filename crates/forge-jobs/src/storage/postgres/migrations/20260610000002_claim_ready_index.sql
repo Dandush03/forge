@@ -1,0 +1,26 @@
+-- Ordered-claim index for claim_next — the throughput fix.
+--
+-- claim_next selects the next claimable row with
+--   WHERE queue_name = ? AND status IN ('pending','failed') AND scheduled_at <= now() …
+--   ORDER BY priority, scheduled_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
+--
+-- The existing jq_claim leads with (queue_name, status, priority, …), but
+-- the `status IN (...)` (two values) means the index can't be walked in
+-- the (priority, scheduled_at, id) order the ORDER BY needs — so the
+-- planner fetches the *entire* eligible set and sorts it (an external
+-- merge sort once the backlog is deep). That makes claim_next O(ready-set)
+-- per claim and caps throughput in the low hundreds/sec once any backlog
+-- builds (measured with benches/loadgen on PG 18).
+--
+-- This partial index keeps `status` OUT of the key columns — it's the
+-- partial predicate instead — so the index holds only claimable rows,
+-- already in claim order. claim_next becomes an O(log n) index seek
+-- regardless of backlog depth (measured: ~277ms → ~0.07ms to claim from a
+-- 200k-pending queue, no sort, no JIT).
+--
+-- It's partial on the claimable statuses, so it's small (excludes
+-- done/dead) and cheap to maintain. jq_claim is left in place for the
+-- queue_name+status prefix lookups other queries use (count_by_status,
+-- oldest_ready_at); drop it later only if profiling shows it's redundant.
+CREATE INDEX jq_claim_ready ON sync_queue (queue_name, priority, scheduled_at, id)
+    WHERE status IN ('pending', 'failed');
