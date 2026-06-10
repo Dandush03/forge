@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Utc};
 use tokio_util::sync::CancellationToken;
 
 use super::routing::Router;
@@ -108,7 +108,7 @@ async fn process_row(
             return None;
         }
     };
-    let next = next_cron_local(&sched, now)?;
+    let next = next_cron_after(&sched, now)?;
 
     match row.next_fire_at {
         None => {
@@ -265,12 +265,17 @@ fn sleep_until_next(next_due: Option<DateTime<Utc>>, now: DateTime<Utc>) -> Dura
     })
 }
 
-fn next_cron_local(sched: &cron::Schedule, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
-    let local_now = now.with_timezone(&Local);
-    sched
-        .after(&local_now)
-        .next()
-        .map(|dt| dt.with_timezone(&Utc))
+/// Next firing strictly after `now`, evaluated in **UTC**.
+///
+/// M3: cron expressions are evaluated against UTC, not the server's local
+/// timezone, so every replica computes the same `next_fire_at` for a given
+/// expression regardless of its `TZ` — leadership handoff can't shift the
+/// cadence, and there's no DST skip/double. The UI renders these instants
+/// in the operator's local zone for display; the schedule itself is
+/// timezone-stable. (A future per-schedule IANA timezone column could
+/// restore local-time semantics deterministically if a host needs it.)
+fn next_cron_after(sched: &cron::Schedule, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    sched.after(&now).next()
 }
 
 /// Ensure a list of cron schedules exists on `storage`.

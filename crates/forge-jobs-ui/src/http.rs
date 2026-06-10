@@ -99,7 +99,8 @@ impl HttpQueueIpc {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, IpcError> {
-        let mut req = Request::get(&self.url(path)).query(query.iter().map(|(k, v)| (*k, v.as_str())));
+        let mut req =
+            Request::get(&self.url(path)).query(query.iter().map(|(k, v)| (*k, v.as_str())));
         if let Some(tok) = self.bearer() {
             req = req.header("Authorization", &format!("Bearer {tok}"));
         }
@@ -127,7 +128,12 @@ impl HttpQueueIpc {
         if let Some(tok) = self.bearer() {
             req = req.header("Authorization", &format!("Bearer {tok}"));
         }
-        let resp = req.json(body).map_err(net_err)?.send().await.map_err(net_err)?;
+        let resp = req
+            .json(body)
+            .map_err(net_err)?
+            .send()
+            .await
+            .map_err(net_err)?;
         ok_or_err(resp).await
     }
 }
@@ -163,7 +169,11 @@ async fn decode<T: DeserializeOwned>(resp: Response) -> Result<T, IpcError> {
 }
 
 /// `from`/`to`/`bucket_secs` triple shared by the timeline + series GETs.
-fn window_query(from: DateTime<Utc>, to: DateTime<Utc>, bucket_secs: u32) -> Vec<(&'static str, String)> {
+fn window_query(
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    bucket_secs: u32,
+) -> Vec<(&'static str, String)> {
     vec![
         ("from", from.to_rfc3339()),
         ("to", to.to_rfc3339()),
@@ -216,8 +226,11 @@ impl QueueIpc for HttpQueueIpc {
         to: DateTime<Utc>,
         bucket_secs: u32,
     ) -> Result<Vec<ResourceHostSeries>, IpcError> {
-        self.get("/queue/resource-series", &window_query(from, to, bucket_secs))
-            .await
+        self.get(
+            "/queue/resource-series",
+            &window_query(from, to, bucket_secs),
+        )
+        .await
     }
 
     async fn queue_db_series(
@@ -244,7 +257,8 @@ impl QueueIpc for HttpQueueIpc {
     }
 
     async fn jobs_failed(&self, limit: u32) -> Result<Vec<JobRow>, IpcError> {
-        self.get("/jobs/failed", &[("limit", limit.to_string())]).await
+        self.get("/jobs/failed", &[("limit", limit.to_string())])
+            .await
     }
 
     async fn jobs_kinds(&self, queue_name: Option<&str>) -> Result<Vec<String>, IpcError> {
@@ -260,8 +274,11 @@ impl QueueIpc for HttpQueueIpc {
 
     // ── mutations ──
     async fn queue_set_max_workers(&self, queue_name: &str, n: i32) -> Result<(), IpcError> {
-        self.post_unit(&format!("/queue/{queue_name}/max-workers"), &json!({ "n": n }))
-            .await
+        self.post_unit(
+            &format!("/queue/{queue_name}/max-workers"),
+            &json!({ "n": n }),
+        )
+        .await
     }
 
     async fn queue_set_paused(&self, queue_name: &str, paused: bool) -> Result<(), IpcError> {
@@ -391,6 +408,7 @@ impl QueueIpc for HttpQueueIpc {
     }
 
     async fn cron_trigger_now(&self, name: &str) -> Result<String, IpcError> {
-        self.post(&format!("/cron/{name}/trigger"), &json!({})).await
+        self.post(&format!("/cron/{name}/trigger"), &json!({}))
+            .await
     }
 }
