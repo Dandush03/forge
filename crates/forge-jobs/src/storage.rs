@@ -94,6 +94,24 @@ pub struct StorageInfo {
     pub fields: Vec<(String, String)>,
 }
 
+/// Outcome of [`JobQueue::delete`].
+///
+/// Distinguishes an actual removal from the in-progress "cancel
+/// requested" path, so callers (and the panel) can report the difference
+/// instead of conflating both as "deleted".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DeleteOutcome {
+    /// A non-running row (`pending`/`failed`/`dead`/`done`) was removed.
+    Deleted,
+    /// The row was `in_progress`: a cancel was requested instead of an
+    /// immediate delete. The row is removed once its worker finalizes (or
+    /// by a later `delete` / the retention sweep).
+    CancelRequested,
+    /// No row matched the id.
+    NotFound,
+}
+
 /// What a [`JobQueue::heartbeat_job`] tick tells the worker to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -277,17 +295,17 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
     /// run by the cleanup loop). Returns the number of rows removed.
     async fn delete_metric_buckets_before(&self, before: DateTime<Utc>) -> Result<u64>;
 
-    /// Delete a job by id (used by Mission Control's "Delete
-    /// selected" action). For non-running statuses (`pending`,
-    /// `failed`, `dead`, `done`) the row is removed and the call
-    /// returns `true`. For `in_progress` rows the call instead sets
-    /// `cancel_requested_at = now()` so the worker's heartbeat
-    /// observes it and stops the handler — the row stays until the
-    /// worker finalizes it, then a second `delete` call (or the
-    /// cleanup retention sweep) removes it. Returns `true` in both
-    /// cases when something changed; `false` only when no row
-    /// matched the id.
-    async fn delete(&self, job_id: &JobId) -> Result<bool>;
+    /// Delete a job by id (used by Mission Control's "Delete selected"
+    /// action). For non-running statuses (`pending`, `failed`, `dead`,
+    /// `done`) the row is removed → [`DeleteOutcome::Deleted`]. For
+    /// `in_progress` rows it instead sets `cancel_requested_at = now()` so
+    /// the worker's heartbeat observes it and stops the handler — the row
+    /// stays until the worker finalizes it (then a later `delete` / the
+    /// retention sweep removes it) → [`DeleteOutcome::CancelRequested`].
+    /// [`DeleteOutcome::NotFound`] when no row matched. (L4: the tri-state
+    /// lets callers report "cancellation requested" instead of conflating
+    /// it with an actual delete.)
+    async fn delete(&self, job_id: &JobId) -> Result<DeleteOutcome>;
 
     /// Move a `failed` / `dead` row back to `pending` so a worker
     /// re-claims it. Used by Mission Control's "Retry" action.

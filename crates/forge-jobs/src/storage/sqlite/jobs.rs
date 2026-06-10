@@ -29,7 +29,7 @@ use crate::storage::types::{
     EnqueueOutcome, EnqueueRequest, ErrorHistoryEntry, FinalizeOutcome, JobId, JobLatency,
     JobRecord, JobStatus, MetricBucket, QueueCounts, TimelineEvent, TimelineEventType, metric,
 };
-use crate::storage::{HeartbeatStatus, JobQueue};
+use crate::storage::{DeleteOutcome, HeartbeatStatus, JobQueue};
 
 use crate::storage::ERROR_HISTORY_CAP;
 
@@ -621,7 +621,7 @@ impl JobQueue for SqliteStorage {
             .collect()
     }
 
-    async fn delete(&self, job_id: &JobId) -> Result<bool> {
+    async fn delete(&self, job_id: &JobId) -> Result<DeleteOutcome> {
         let _t = OpTimer::write(&self.db_recorder);
         let now_iso = iso(Utc::now());
         let mut tx = self.write_pool.begin().await.map_err(map_sqlx_err)?;
@@ -642,7 +642,7 @@ impl JobQueue for SqliteStorage {
         .map_err(map_sqlx_err)?;
         if cancel_row.is_some() {
             tx.commit().await.map_err(map_sqlx_err)?;
-            return Ok(true);
+            return Ok(DeleteOutcome::CancelRequested);
         }
         // Otherwise it's a terminal/pending row — cascade-delete the
         // timeline events first so a crash can't leave orphan events
@@ -658,7 +658,11 @@ impl JobQueue for SqliteStorage {
             .await
             .map_err(map_sqlx_err)?;
         tx.commit().await.map_err(map_sqlx_err)?;
-        Ok(res.rows_affected() > 0)
+        Ok(if res.rows_affected() > 0 {
+            DeleteOutcome::Deleted
+        } else {
+            DeleteOutcome::NotFound
+        })
     }
 
     async fn requeue(&self, job_id: &JobId) -> Result<bool> {

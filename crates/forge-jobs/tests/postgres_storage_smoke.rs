@@ -32,8 +32,8 @@ use chrono::Utc;
 use forge_jobs::PostgresStorage;
 use forge_jobs::TimelineEventType;
 use forge_jobs::storage::{
-    CronStorage, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue, JobStatus,
-    NewCronSchedule, ProcessRegistry, QueueConfig,
+    CronStorage, DeleteOutcome, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobQueue,
+    JobStatus, NewCronSchedule, ProcessRegistry, QueueConfig,
 };
 use serde_json::json;
 use testcontainers_modules::postgres::Postgres;
@@ -278,7 +278,10 @@ async fn delete_cascades_to_queue_event_rows() {
         .unwrap();
     assert_eq!(pre.len(), 3);
 
-    assert!(b.storage.delete(&id).await.unwrap());
+    assert_ne!(
+        b.storage.delete(&id).await.unwrap(),
+        DeleteOutcome::NotFound
+    );
 
     let post = b
         .storage

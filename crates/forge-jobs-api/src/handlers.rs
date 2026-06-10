@@ -14,8 +14,8 @@
 
 use chrono::{DateTime, Utc};
 use forge_jobs::{
-    EnqueueRequest, JobId, JobRecord, JobStatus, NOOP_ECHO_KIND, Storage, TimelineEventType,
-    cleanup_once,
+    DeleteOutcome, EnqueueRequest, JobId, JobRecord, JobStatus, NOOP_ECHO_KIND, Storage,
+    TimelineEventType, cleanup_once,
 };
 
 use crate::Error;
@@ -319,8 +319,13 @@ async fn retry_all_in_status(storage: &Storage, status: JobStatus) -> Result<u64
 pub async fn jobs_delete(storage: &Storage, ids: &[String]) -> Result<u64, Error> {
     let mut n = 0u64;
     for id in ids {
-        if storage.jobs.delete(&JobId::new(id.clone())).await? {
-            n += 1;
+        // Count both an actual removal and an in-progress cancel-request
+        // as "touched" — the caller asked to delete, and something
+        // happened. `NotFound` (already gone) doesn't count.
+        match storage.jobs.delete(&JobId::new(id.clone())).await? {
+            DeleteOutcome::Deleted | DeleteOutcome::CancelRequested => n += 1,
+            // `NotFound` (already gone) and any future variant: not counted.
+            _ => {}
         }
     }
     Ok(n)
