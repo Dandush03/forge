@@ -425,19 +425,42 @@ async fn resolve_target(storage: &Storage, queue_name: &str, host_id: &str) -> O
         return Some(0);
     }
     // This pod's share of the cluster-wide max_workers, as set by the
-    // rebalancer. Fall back to the full total when no assignment exists
-    // yet (fresh pod, pre-first-rebalance, or rebalancer down) so the
-    // pod always does work; the next rebalance trims it to the fair
-    // share. On SQLite the lone pod is assigned the whole total.
+    // rebalancer. When no assignment exists yet (fresh pod,
+    // pre-first-rebalance, or rebalancer down) fall back to a fair-share
+    // *estimate* — NOT the full total. M6: running the whole total here
+    // means a rolling deploy's N replacement pods each spin up the full
+    // count, an N× over-parallelism storm aimed at the very upstreams the
+    // cluster rate budget exists to protect. The next rebalance refines
+    // the estimate. On SQLite the lone live pod estimates the whole total.
     let raw = match storage.procs.get_slots(queue_name, host_id).await {
         Ok(Some(slots)) => usize::try_from(slots).unwrap_or(0),
-        Ok(None) => usize::try_from(q.max_workers).unwrap_or(0),
+        Ok(None) => fair_fallback(storage, q.max_workers).await,
         Err(e) => {
-            tracing::warn!(queue = %queue_name, ?e, "supervisor: slot lookup failed; using total");
-            usize::try_from(q.max_workers).unwrap_or(0)
+            tracing::warn!(queue = %queue_name, ?e, "supervisor: slot lookup failed; estimating fair share");
+            fair_fallback(storage, q.max_workers).await
         }
     };
     Some(raw.min(WORKER_CAP))
+}
+
+/// Fair-share worker estimate for a pod that has no slot assignment yet.
+/// `max_workers` is the cluster total; divide by the live-pod count
+/// (rounded up so the fleet never *under*-serves the total), clamped to
+/// ≥1 pod. Used only on the rare unassigned / rebalancer-down path, so
+/// the extra `list_live_pods` read isn't on the steady per-tick path.
+async fn fair_fallback(storage: &Storage, max_workers: i32) -> usize {
+    let total = usize::try_from(max_workers).unwrap_or(0);
+    if total == 0 {
+        return 0;
+    }
+    let stale_before = Utc::now() - STALE_THRESHOLD;
+    let pods = storage
+        .procs
+        .list_live_pods(stale_before)
+        .await
+        .map_or(1, |p| p.len())
+        .max(1);
+    total.div_ceil(pods)
 }
 
 fn scale_down(workers: &mut HashMap<usize, WorkerSlot>, target: usize) {
