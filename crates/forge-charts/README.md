@@ -25,7 +25,7 @@ accessor closures over their own data type.
 
 ```toml
 [dependencies]
-forge-charts = "0.1"
+forge-charts = "0.2"
 leptos       = { version = "0.8", features = ["csr"] }
 ```
 
