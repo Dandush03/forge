@@ -20,7 +20,7 @@ serde_json    = { workspace = true }
 async-trait   = { workspace = true }
 wasm-bindgen  = "0.2"
 web-sys       = { version = "0.3", features = ["Window", "Navigator"] }
-forge-charts = { path = "../forge-charts", version = "0.1" }
+forge-charts = { path = "../forge-charts", version = "0.2" }
 # `http` feature only: a ready-made HTTP `QueueIpc` (browser / webview
 # `fetch`) that talks to a `forge-jobs-api` server. Off by default so
 # the base panel stays transport-agnostic.
