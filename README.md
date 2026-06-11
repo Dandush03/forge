@@ -83,10 +83,10 @@ Mini chart per queue expands to the same `AreaChart` the overview uses.
 
 | Crate | crates.io | docs.rs | Description |
 |---|---|---|---|
-| [`forge-jobs`](crates/forge-jobs/) | TBD | TBD | Sidekiq-style queue with embedded SQLite + pluggable Postgres. Per-queue workers, cron, cluster-wide rate-limit budget, cancellation that survives across replicas. |
-| [`forge-jobs-api`](crates/forge-jobs-api/) | TBD | TBD | HTTP transport for `forge-jobs` (Axum routes + JSON DTOs). Drop-in for a deployed multi-replica service. |
-| [`forge-jobs-ui`](crates/forge-jobs-ui/) | TBD | TBD | Reusable Leptos panel for the queue — overview, timeline, per-queue charts, cron, scheduled jobs, dead-letter inspector. Host-agnostic via a `QueueIpc` trait. |
-| [`forge-charts`](crates/forge-charts/) | TBD | TBD | Pure-Rust + SVG interactive charts for Leptos CSR. No JS, no canvas, no Tailwind. Used by `forge-jobs-ui` but independent. |
+| [`forge-jobs`](crates/forge-jobs/) | [![crates.io](https://img.shields.io/crates/v/forge-jobs.svg)](https://crates.io/crates/forge-jobs) | [![docs.rs](https://img.shields.io/docsrs/forge-jobs)](https://docs.rs/forge-jobs) | Sidekiq-style queue with embedded SQLite + pluggable Postgres. Per-queue workers, cron, cluster-wide rate-limit budget, cancellation that survives across replicas. |
+| [`forge-jobs-api`](crates/forge-jobs-api/) | [![crates.io](https://img.shields.io/crates/v/forge-jobs-api.svg)](https://crates.io/crates/forge-jobs-api) | [![docs.rs](https://img.shields.io/docsrs/forge-jobs-api)](https://docs.rs/forge-jobs-api) | HTTP transport for `forge-jobs` (Axum routes + JSON DTOs). Drop-in for a deployed multi-replica service. |
+| [`forge-jobs-ui`](crates/forge-jobs-ui/) | [![crates.io](https://img.shields.io/crates/v/forge-jobs-ui.svg)](https://crates.io/crates/forge-jobs-ui) | [![docs.rs](https://img.shields.io/docsrs/forge-jobs-ui)](https://docs.rs/forge-jobs-ui) | Reusable Leptos panel for the queue — overview, timeline, per-queue charts, cron, scheduled jobs, dead-letter inspector. Host-agnostic via a `QueueIpc` trait. |
+| [`forge-charts`](crates/forge-charts/) | [![crates.io](https://img.shields.io/crates/v/forge-charts.svg)](https://crates.io/crates/forge-charts) | [![docs.rs](https://img.shields.io/docsrs/forge-charts)](https://docs.rs/forge-charts) | Pure-Rust + SVG interactive charts for Leptos CSR. No JS, no canvas, no Tailwind. Used by `forge-jobs-ui` but independent. |
 
 ## Design goals
 
@@ -187,8 +187,8 @@ nothing in the runtime moves.
 
 ## Status
 
-`0.1` — internal API mostly stable, a few naming + restructure passes still
-likely before `1.0`. Pin a specific commit if you want byte-for-byte
+`0.2` — internal API mostly stable, a few naming + restructure passes still
+likely before `1.0`. Pin a specific version if you want byte-for-byte
 reproducibility during this window.
 
 ## Choosing crates
