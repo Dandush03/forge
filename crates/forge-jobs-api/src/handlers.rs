@@ -96,6 +96,7 @@ pub async fn queue_workers(storage: &Storage) -> Result<WorkersOverviewDto, Erro
         &slots,
         &queue_names,
         now,
+        stale_before,
     ))
 }
 

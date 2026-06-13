@@ -156,11 +156,20 @@ pub fn workers_overview_dto(
     slots: &[SlotAssignment],
     queue_names: &[String],
     now: DateTime<Utc>,
+    stale_before: DateTime<Utc>,
 ) -> WorkersOverviewDto {
     let workers = pods
         .into_iter()
         .map(|pod| {
-            let host_procs = processes.iter().filter(|p| p.host_id == pod.host_id);
+            // Only worker-slot rows whose own heartbeat is still fresh
+            // count toward live/in-flight. `procs.list` returns every row
+            // regardless of liveness, and the per-process reaper lags the
+            // pod-liveness window (REAPER_TICK 15s vs 60s threshold), so an
+            // unfiltered count would report a crashed slot — and its
+            // last job as still "in-flight" — for up to a reap cycle.
+            let host_procs = processes
+                .iter()
+                .filter(|p| p.host_id == pod.host_id && p.heartbeat_at >= stale_before);
             let workers_live = host_procs.clone().count();
             let in_flight = host_procs.filter(|p| p.current_job.is_some()).count();
             let slots = slots
