@@ -141,8 +141,10 @@ pub struct WorkerSlotDto {
 #[non_exhaustive]
 pub struct WorkersOverviewDto {
     pub workers: Vec<WorkerDto>,
-    /// Configured queues that no live worker declared — their jobs won't
-    /// run until a worker picks them up. Surfaced as a warning banner.
+    /// Configured queues no live worker is serving — none declared them,
+    /// or those that did hold zero running slots (paused / zeroed). Their
+    /// jobs won't run until a worker covers them. Surfaced as a warning
+    /// banner.
     pub unassigned_queues: Vec<String>,
 }
 
@@ -199,16 +201,19 @@ pub fn workers_overview_dto(
         })
         .collect::<Vec<_>>();
 
-    // A queue is unassigned when no live worker is eligible for it. A
-    // worker with an empty declared set is a legacy pre-upgrade pod,
-    // eligible for every queue (mirrors PodRecord::handles), so it covers
-    // everything and the banner stays quiet during a rolling upgrade.
+    // A queue is unassigned when no live worker holds a positive slot
+    // serving it. This is stronger than "no worker declared it": it also
+    // catches a queue that *is* declared but has zero running slots — e.g.
+    // paused (`max_workers = 0`) or zeroed by the rebalancer — whose jobs
+    // equally won't run. A legacy pre-upgrade pod (empty declared set) is
+    // eligible for everything and so the rebalancer gives it positive
+    // slots, which keeps those queues out of this list during a rollout.
     let unassigned_queues = queue_names
         .iter()
         .filter(|name| {
             !workers
                 .iter()
-                .any(|w| w.queues.is_empty() || w.queues.iter().any(|q| q == *name))
+                .any(|w| w.slots.iter().any(|s| &s.queue_name == *name))
         })
         .cloned()
         .collect();
@@ -627,4 +632,79 @@ pub struct SeriesQuery {
     pub from: DateTime<Utc>,
     pub to: DateTime<Utc>,
     pub bucket_secs: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_jobs::JobId;
+
+    fn pod(host: &str, queues: &[&str], hb: DateTime<Utc>) -> PodRecord {
+        PodRecord {
+            host_id: host.to_owned(),
+            worker_name: None,
+            queues: queues.iter().map(|q| (*q).to_owned()).collect(),
+            heartbeat_at: hb,
+        }
+    }
+
+    fn proc(host: &str, queue: &str, hb: DateTime<Utc>, running: bool) -> ProcessRecord {
+        ProcessRecord {
+            process_id: format!("{queue}-0-{host}"),
+            queue_name: queue.to_owned(),
+            host_id: host.to_owned(),
+            started_at: hb,
+            heartbeat_at: hb,
+            current_job: running.then(|| JobId::new("01HXXXXXXXXXXXXXXXXXXXXXXXX")),
+        }
+    }
+
+    fn slot(host: &str, queue: &str, slots: i32) -> SlotAssignment {
+        SlotAssignment {
+            queue_name: queue.to_owned(),
+            host_id: host.to_owned(),
+            slots,
+        }
+    }
+
+    // L7: a worker-slot row whose own heartbeat is stale must not count
+    // toward workers_live / in_flight even though its pod is still live.
+    #[test]
+    fn stale_worker_rows_are_excluded_from_counts() {
+        let now = Utc::now();
+        let stale_before = now - chrono::Duration::seconds(60);
+        let pods = vec![pod("h1", &["gh"], now)];
+        let procs = vec![
+            proc("h1", "gh", now, true),                                   // fresh + running
+            proc("h1", "gh", now - chrono::Duration::seconds(120), true),  // stale (crashed)
+        ];
+        let slots = vec![slot("h1", "gh", 2)];
+        let queue_names = vec!["gh".to_owned()];
+
+        let dto = workers_overview_dto(pods, &procs, &slots, &queue_names, now, stale_before);
+
+        assert_eq!(dto.workers.len(), 1);
+        assert_eq!(dto.workers[0].workers_live, 1, "only the fresh slot counts");
+        assert_eq!(dto.workers[0].in_flight, 1, "stale slot's job not counted in-flight");
+    }
+
+    // L10: a queue is unassigned when no live worker holds a positive slot
+    // for it — covering both "no declarer" and "declared but zero slots".
+    #[test]
+    fn unassigned_covers_declared_but_unserved_queues() {
+        let now = Utc::now();
+        let stale_before = now - chrono::Duration::seconds(60);
+        // h1 declares gh + idle, but the rebalancer only gave it gh slots.
+        let pods = vec![pod("h1", &["gh", "idle"], now)];
+        let procs = vec![proc("h1", "gh", now, false)];
+        let slots = vec![slot("h1", "gh", 3)]; // none for "idle"
+        let queue_names = vec!["gh".to_owned(), "idle".to_owned(), "paused".to_owned()];
+
+        let dto = workers_overview_dto(pods, &procs, &slots, &queue_names, now, stale_before);
+
+        // gh is served; idle is declared-but-zero-slots; paused is undeclared.
+        assert!(!dto.unassigned_queues.contains(&"gh".to_owned()));
+        assert!(dto.unassigned_queues.contains(&"idle".to_owned()), "declared but 0 slots → unassigned");
+        assert!(dto.unassigned_queues.contains(&"paused".to_owned()), "undeclared → unassigned");
+    }
 }
