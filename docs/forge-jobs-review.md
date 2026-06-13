@@ -6,6 +6,14 @@ exposure surfaces in `forge-jobs-api`.
 **Commit:** `4e64db5` · **Date:** 2026-06-10
 **Refreshed:** 2026-06-13 — reviewed the per-schedule cron `dedupe_key`
 (skip-if-in-flight) feature on the uncommitted 0.2.1 diff; appended **L6**.
+**Refreshed:** 2026-06-13 — reviewed the per-worker queue-affinity +
+Workers-tab feature on the uncommitted 0.2.x diff (`runtime.rs`,
+`runtime/rebalance.rs`, the new `pod.worker_name`/`queues` columns + both
+adapters, `forge-jobs-api` `/queue/workers`, `forge-jobs-ui` `workers.rs`);
+appended **H3** and **L7–L12**. Pure DRY/efficiency observations from that
+pass (duplicated `encode/decode_queues`, duplicated heartbeat-dot
+thresholds, duplicated tab-poll boilerplate, the quadratic DTO scans) are
+**out of scope here** — they belong to `refactor-pass`.
 **Scope:** correctness, races, failover, cross-replica parity,
 SQLite⇄Postgres parity, scaling, leak/exposure.
 **Out of scope:** style/lint — `clippy -D warnings` and `fmt` are assumed
@@ -93,6 +101,48 @@ default single-process SQLite build say so explicitly; ones marked
   in-process per-queue `tokio::sync::Notify` hub — i.e. reuse the SQLite
   `NotifyHub` shape with the PG listener as the producer. `wait_for_work`
   then blocks on the in-process notify, exactly like the SQLite adapter.
+
+### H3 — A configured queue that no live worker declares is silently unserved — jobs sit `pending` forever
+
+- **Where:** `runtime.rs::QueueRuntime::start` (now spawns supervisors only
+  for `self.queues`, no longer for every `config.list_queues()` row) +
+  `runtime/rebalance.rs::rebalance_once` (the new `eligible` filter
+  `p.queues.iter().any(|n| n == &q.name)` and the zero-out pass that
+  follows it). Eligibility is decoded from `pod.queues` via
+  `storage::sqlite::decode_queues` / `storage::postgres::decode_queues`
+  (NULL/empty CSV → eligible for *no* queue). The sole operator-visible
+  guard is `forge-jobs-api::dto::workers_overview_dto`'s
+  `unassigned_queues`, rendered as the `forge-jobs-ui::workers` banner.
+- **Why it matters (fires on every build, SQLite included):** the prior
+  contract was *every pod runs every configured queue*, so a configured
+  queue was always served by someone. Affinity inverts that: a queue runs
+  only if some live pod's `FORGE_QUEUES` / `with_queues` set names it. A
+  single typo (`FORGE_QUEUES=guthub`), or a queue added to `config` but to
+  no worker's set, means every job enqueued there is never dequeued, never
+  run, never requeued — it accumulates `pending` forever. `start()`'s
+  fail-fast only catches the *totally empty* set, not a wrong/partial one.
+  On a rolling Postgres upgrade the window widens to the whole fleet: a
+  pre-upgrade pod (and any new pod before its first heartbeat writes the
+  `queues` column) decodes to an empty set, so for every queue `eligible`
+  is empty, `fair_shares(total, 0)` returns nothing, *and* the zero-out
+  pass actively pins each such pod to 0 slots — all queues stall until
+  every pod has re-heartbeated with the new code and a later rebalance
+  tick runs. Self-healing for the upgrade case; permanent for the
+  misconfig case. The new Workers-tab banner is the only signal, and only
+  if someone is watching it. The new tests (`only_pods_that_declared_the
+  _queue_get_slots`, `queue_with_no_eligible_pod_gets_no_positive_slots`)
+  *encode this as intended* — they assert the queue is correctly starved —
+  so the behavioral risk is unguarded by any alarm.
+- **Fix:** make the coordinator loud, not just the panel — in
+  `rebalance_once`, when a configured queue's `eligible` set is empty,
+  `tracing::warn!(queue = %q.name, "rebalance: no live worker declares
+  this queue; its jobs will not run")` so it reaches logs/alerts. Document
+  the operational contract (every configured queue must appear in some
+  worker's `FORGE_QUEUES`) in `operating-at-scale.md`. For the upgrade
+  transient, distinguish a NULL `queues` column (pre-upgrade, *unknown*)
+  from an empty CSV (declared none) at the `decode_queues` boundary and
+  treat NULL as eligible-for-all for one `STALE_THRESHOLD`, so a
+  pre-upgrade fleet keeps draining until it re-heartbeats.
 
 ## MEDIUM
 
@@ -292,7 +342,137 @@ default single-process SQLite build say so explicitly; ones marked
   defensible (the schedule *did* evaluate), so leave the CAS as-is — the
   fix is purely in the report/log so fired is distinguishable from skipped.
 
+### L7 — `GET /queue/workers` counts stale, un-reaped worker rows → inflated live / in-flight figures
+
+- **Where:** `forge-jobs-api::handlers::queue_workers` calls
+  `storage.procs.list(None)` — no liveness predicate (confirmed:
+  `sqlite/procs.rs::list` / `postgres.rs::list` are bare
+  `SELECT * FROM queue_process`) — folded by
+  `dto::workers_overview_dto`, which counts every `ProcessRecord` whose
+  `host_id` matches a *live* pod.
+- **Why it matters:** `pod` rows use a 60 s liveness window, but
+  `queue_process` rows are only removed by the reaper (`REAPER_TICK` 15 s
+  vs `STALE_THRESHOLD` 60 s), so for up to ~75 s after a worker slot dies
+  its row still counts. A live pod whose slot crashed reads `workers N+1`,
+  and if that slot held a `current_job`, `in-flight 1` for a job that is
+  no longer running. Cosmetic (monitoring only), both adapters.
+- **Fix:** `ProcessRecord` already carries `heartbeat_at`; filter
+  `now - p.heartbeat_at < WORKER_LIVENESS_SECS` in `workers_overview_dto`
+  before counting (the handler already threads `now`), matching the pod
+  window.
+
+### L8 — Worker heartbeat-age (the health dot) is computed across two clock domains
+
+- **Where:** `dto::workers_overview_dto`
+  (`heartbeat_age_seconds = now - pod.heartbeat_at`, `now = Utc::now()` on
+  the *API host*) vs `pod.heartbeat_at`, written with the *worker's*
+  `Utc::now()` in `{sqlite,postgres}::pod_heartbeat`.
+- **Why it matters:** same class as **L5** — in a multi-replica
+  deployment the API host and the worker pod are different machines. With
+  app↔app clock skew the subtraction straddles two clocks: a live worker
+  can read `is-down` (age inflated) or a freshly-dead one stay green
+  (negative age, clamped to 0 by `.max(0)`). Cosmetic, self-correcting as
+  skew narrows.
+- **Fix:** none strictly required (fold into L5's clock-domain note); or
+  derive `now` from the DB clock (`SELECT now()`) on PG so both ends of
+  the subtraction share one domain.
+
+### L9 — Rebalancer zero-out pass writes O(pods × queues) no-op `set_slots` every tick
+
+- **Where:** `runtime/rebalance.rs::rebalance_once` — the second loop
+  issues `set_slots(q, host, 0)` for every live pod *not* in `eligible`,
+  for every queue, every `REBALANCE_TICK` (5 s).
+- **Why it matters:** in steady state nothing changes, yet a 50-pod /
+  10-queue fleet where each pod owns one queue issues ~450 upserts every
+  5 s, forever — WAL/replication churn on Postgres for zero state change.
+  The wasteful-but-harmless **LOW** class (the "busy-poll when `NOTIFY`
+  would do" shape).
+- **Fix:** `list_slot_assignments` (added in this same diff) already
+  exposes current rows; zero only pods that actually hold a *positive*
+  stale assignment for a queue they no longer declare (diff
+  desired-vs-current), so steady state writes nothing — this also folds
+  the assign + zero passes into one idempotent pass.
+
+### L10 — `unassigned_queues` flags only *undeclared* queues, not declared-but-unserved ones
+
+- **Where:** `dto::workers_overview_dto` — `unassigned_queues` is the set
+  of configured names no worker's `queues` contains.
+- **Why it matters:** a queue *declared* by a worker but with
+  `max_workers = 0` (paused) or otherwise sitting at 0 slots has nothing
+  actually serving it, yet is reported as assigned → no banner, while its
+  jobs don't run. Narrow (paused is usually intentional); cosmetic.
+- **Fix:** also flag a queue whose summed live `SlotAssignment.slots` is 0
+  (the handler already fetches `list_slot_assignments`), and word the
+  banner to distinguish "no declarer" from "declared but no running slot".
+
+### L11 — The `queues` CSV column corrupts a queue name containing a comma
+
+- **Where:** `storage::sqlite::encode_queues` / `decode_queues` and the
+  byte-identical `storage::postgres` pair (`queues.join(",")` ⇄
+  `split(',')`), with no escaping; queue names are never validated against
+  commas on the `with_queues` / `ensure_queue` path.
+- **Why it matters:** `with_queues(["orders,eu"])` round-trips as two
+  phantom queues `orders` + `eu`; the pod is never eligible for the real
+  `orders,eu`, which then surfaces in `unassigned_queues` and is never
+  served (an L7/H3 interaction). Both adapters corrupt *identically* —
+  parity holds, it's a shared-helper bug, not a divergence. Pathological
+  input today (no real queue name has a comma), so it's an unguarded
+  invariant rather than a live bug.
+- **Fix:** reject commas in queue names at the `with_queues` /
+  `ensure_queue` boundary (the repo already validates operator strings —
+  cf. CSS-color validation), or store a JSON array. Hoist the shared
+  helper into `storage::types` while you're there so the encoding contract
+  lives once (parity-preserving by construction).
+
+### L12 — `WorkersTab` ignores runtime changes to the panel refresh cadence
+
+- **Where:** `forge-jobs-ui::workers::WorkersTab` reads `PollIntervalMs`
+  via `get_untracked()` once and builds a single
+  `set_interval_with_handle`; the Overview poller in `queue_root.rs` wraps
+  its timer in an `Effect` that re-tracks `poll_ms` and reinstalls on
+  change.
+- **Why it matters:** changing the header refresh-interval selector (or
+  pausing it) reinstalls the Overview timer but not the Workers one, which
+  keeps its mount-time cadence until remount. Cosmetic. (The
+  `scheduled`/`timeline`/`resources` tabs hardcode their interval and also
+  don't react — but they don't *read* the reactive context and then ignore
+  it, which is the surprising part here.)
+- **Fix:** mirror the Overview pattern — install the interval inside an
+  `Effect` that reads `poll_ms.get()` so the timer re-creates on change;
+  or drop to a hardcoded const like the sibling tabs, for honesty.
+
 ## Confirmed sound (reviewed, no change needed)
+
+- **Per-worker queue affinity (0.2.x) — mechanism** — `with_queues`
+  de-dups and drops empties; `start()` hard-errors (`StorageError::Config`)
+  on an empty set, so "silently drain everything" is gone *by design*
+  (test `start_without_declared_queues_errors`). `fair_shares(total, 0)`
+  returns empty — a queue with no eligible pod can't divide-by-zero. Every
+  caller of the changed signatures was updated (`pod_heartbeat` +
+  `worker_name`/`queues`; `list_live_pods` → `Vec<PodRecord>`;
+  `fair_fallback` + `queue_name`); `list_slot_assignments` is implemented
+  on both adapters (the only two `impl ProcessRegistry`); the
+  `/queue/workers` route and `QueueIpc::queue_workers` are wired and
+  `HttpQueueIpc` is the sole impl. The residual is *visibility/scale*, not
+  a claim/loss race — see H3 and L7–L12.
+- **Affinity SQLite⇄Postgres parity** — `encode/decode_queues` are
+  byte-identical; `pod_heartbeat` upserts `worker_name`/`queues` with the
+  same `ON CONFLICT` shape; `list_live_pods` orders by `host_id ASC` on
+  both, so `fair_shares`' remainder distribution stays deterministic
+  across adapters. `list_slot_assignments` reads `slots` as `i32` (PG) vs
+  `i64`-then-`try_from` (SQLite) — identical for the small counts involved.
+  (The shared-helper comma bug, L11, is a parity-preserving defect.)
+- **Affinity failover** — `reap_stale` still deletes the `pod` row (now
+  including the new columns) and its `pod_slot_assignment` rows; per-boot
+  ULID `host_id` means a reborn pod can't inherit a dead pod's slots or
+  stale `queues`.
+- **Affinity injection / leak surface** — `queues` reaches SQL only as a
+  bound CSV string (`.bind(queues_csv)`); no `format!` into SQL, no new
+  `NOTIFY` identifier introduced. `worker_name` / `queues` / `host_id` are
+  operator-set labels, not secrets, and the new `WorkerDto` + route expose
+  no payloads or DSNs. `StorageError::Config` falls through the API error
+  map to a generic 500, but `start()` is never called inside a request
+  handler, so it's latent, not reachable.
 
 - **Claim atomicity** — both adapters claim via a single-statement
   `UPDATE … WHERE id = (SELECT … LIMIT 1 [FOR UPDATE SKIP LOCKED])
@@ -375,6 +555,23 @@ default single-process SQLite build say so explicitly; ones marked
    small design choice first).
 7. **L1, L2, L4, L5** — opportunistic hardening.
 
+**0.2.x per-worker affinity (new, pending):**
+
+8. **H3** — make an unserved queue visible in logs (rebalancer `warn!`) +
+   document the contract; decide the NULL-vs-empty `queues` upgrade-window
+   behavior. Matters on *every* build today (a `FORGE_QUEUES` typo strands
+   a queue on the single-process SQLite build too), so do it first of the
+   new batch.
+9. **L7 + L10** — Workers-tab accuracy pair (filter stale process rows;
+   flag declared-but-zero-slot queues); both are single
+   `dto::workers_overview_dto` edits.
+10. **L9** — rebalance zero-out diff-not-rewrite; land it when touching
+    `list_slot_assignments`.
+11. **L11** — reject commas in queue names (and hoist the shared
+    `encode/decode_queues` into `storage::types`).
+12. **L8, L12** — opportunistic (clock-domain doc note; Workers-tab
+    interval `Effect`).
+
 ## Fix status
 
 | ID | Status      | Commit / note |
@@ -393,3 +590,10 @@ default single-process SQLite build say so explicitly; ones marked
 | L4 | fixed | `JobQueue::delete` returns `DeleteOutcome` {Deleted, CancelRequested, NotFound}; API keeps its `u64` touched-count contract |
 | L5 | fixed | Documented the lease (DB clock) vs pod-liveness (app clock) split + the 60s `STALE_THRESHOLD` drift assumption in `docs/operating-at-scale.md` ("Clock domains"); SQL-domain unification noted there as the future option |
 | L6 | fixed | `process_row` matches the enqueue outcome: `EnqueueOutcome::Deduped` → new `CronTickReport::skipped` counter + `debug!` "fire skipped — prior run still in flight"; `Enqueued` → `fired` + the "fired schedule" info log (moved below the enqueue). `cron: tick` summary surfaces `skipped`. Test `dedupe_keyed_schedule_skips_while_a_run_is_in_flight` asserts the fired/skipped split |
+| H3 | **pending** | rebalancer `warn!` on a configured queue with no eligible pod + document the "every configured queue must be in some worker's `FORGE_QUEUES`" contract in `operating-at-scale.md`; decide NULL-vs-empty `queues` upgrade-window handling at `decode_queues` |
+| L7 | **pending** | filter `queue_process` rows by `heartbeat_at` freshness (< `WORKER_LIVENESS_SECS`) in `workers_overview_dto` before counting live/in-flight |
+| L8 | **pending** | clock-domain note (cf. L5), or derive `now` from the DB clock for `heartbeat_age_seconds` on PG |
+| L9 | **pending** | zero-out only pods holding a positive stale assignment (diff vs `list_slot_assignments`) instead of O(pods×queues) writes every tick |
+| L10 | **pending** | flag declared-but-zero-slot queues in `unassigned_queues` by summing live `SlotAssignment.slots` |
+| L11 | **pending** | reject commas in queue names at `with_queues`/`ensure_queue`; hoist the shared CSV helper into `storage::types` |
+| L12 | **pending** | re-track `PollIntervalMs` in `WorkersTab` via an `Effect` (mirror the Overview poller) |
