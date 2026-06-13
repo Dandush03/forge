@@ -80,6 +80,7 @@ pub fn build(storage: Arc<Storage>) -> Router {
         .route("/cron", get(cron_list_route))
         .route("/cron/{name}/enabled", post(cron_set_enabled_route))
         .route("/cron/{name}/expr", post(cron_set_expr_route))
+        .route("/cron/{name}/dedupe", post(cron_set_dedupe_route))
         .route("/cron/{name}/trigger", post(cron_trigger_now_route))
         .with_state(storage)
 }
@@ -352,6 +353,14 @@ async fn cron_set_expr_route(
     Json(body): Json<dto::CronSetExprRequest>,
 ) -> Result<(), Error> {
     handlers::cron_set_expr(&storage, &name, &body.expr).await
+}
+
+async fn cron_set_dedupe_route(
+    State(storage): State<Arc<Storage>>,
+    Path(name): Path<String>,
+    Json(body): Json<dto::CronSetDedupeRequest>,
+) -> Result<(), Error> {
+    handlers::cron_set_dedupe(&storage, &name, body.dedupe).await
 }
 
 async fn cron_trigger_now_route(

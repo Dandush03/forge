@@ -296,6 +296,10 @@ pub struct CronSchedule {
     pub enabled: bool,
     #[serde(default)]
     pub max_attempts: Option<i32>,
+    /// When set, each firing dedupes against it (skip-if-in-flight). The
+    /// Cron tab renders this as a checkbox.
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
     #[serde(default)]
     pub last_fired_at: Option<DateTime<Utc>>,
     #[serde(default)]
@@ -507,6 +511,10 @@ pub trait QueueIpc: Send + Sync + 'static {
     async fn cron_list(&self) -> Result<Vec<CronSchedule>, IpcError>;
     async fn cron_set_enabled(&self, name: &str, enabled: bool) -> Result<(), IpcError>;
     async fn cron_set_expr(&self, name: &str, expr: &str) -> Result<(), IpcError>;
+    /// Toggle skip-if-in-flight: `true` dedupes each firing against the
+    /// schedule name (a tick during an active run is a no-op); `false`
+    /// clears it.
+    async fn cron_set_dedupe(&self, name: &str, dedupe: bool) -> Result<(), IpcError>;
     /// Force a schedule to fire immediately. Returns the enqueued job id.
     async fn cron_trigger_now(&self, name: &str) -> Result<String, IpcError>;
 }

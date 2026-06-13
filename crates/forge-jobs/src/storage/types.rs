@@ -620,6 +620,12 @@ pub struct NewCronSchedule {
     pub cron_expr: String,
     pub enabled: bool,
     pub max_attempts: Option<i32>,
+    /// When set, each cron firing enqueues with this dedupe key, so a
+    /// tick that lands while the previous run is still pending or
+    /// in-progress collapses to a no-op instead of stacking the queue.
+    /// `None` keeps the old fire-every-tick behavior. Convention: set it
+    /// to the schedule `name` so the key is unique per schedule.
+    pub dedupe_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -634,6 +640,9 @@ pub struct CronScheduleRecord {
     pub enabled: bool,
     #[serde(default)]
     pub max_attempts: Option<i32>,
+    /// Dedupe key applied to each firing — see [`NewCronSchedule::dedupe_key`].
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
     #[serde(default)]
     pub last_fired_at: Option<DateTime<Utc>>,
     #[serde(default)]

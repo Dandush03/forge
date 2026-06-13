@@ -116,6 +116,7 @@ fn CronRow(
     let name = seed.name.clone();
     let name_for_toggle = name.clone();
     let name_for_save = name.clone();
+    let name_for_dedupe = name.clone();
     let name_for_trigger = name.clone();
     let name_for_live = name.clone();
     let name_label = name;
@@ -131,6 +132,8 @@ fn CronRow(
     let live =
         Memo::new(move |_| rows.with(|all| all.iter().find(|r| r.name == name_for_live).cloned()));
     let enabled = Memo::new(move |_| live.with(|l| l.as_ref().is_some_and(|r| r.enabled)));
+    let dedup_on =
+        Memo::new(move |_| live.with(|l| l.as_ref().is_some_and(|r| r.dedupe_key.is_some())));
     let live_expr = Memo::new(move |_| {
         live.with(|l| l.as_ref().map_or(String::new(), |r| r.cron_expr.clone()))
     });
@@ -169,6 +172,7 @@ fn CronRow(
     // Two transient signals so each button can show its own
     // "Pausing…/Resuming…/Running…" label independently of the others.
     let pending_toggle = RwSignal::new(false);
+    let pending_dedupe = RwSignal::new(false);
     let pending_run = RwSignal::new(false);
     // Flashes briefly after a successful Run-now so the user has a
     // visible "yes, it fired" beat before the row state refreshes.
@@ -237,6 +241,30 @@ fn CronRow(
                 );
             }
             pending_run.set(false);
+        });
+    };
+
+    let on_dedupe = move |ev| {
+        if pending_dedupe.get_untracked() {
+            return;
+        }
+        let prev = dedup_on.get_untracked();
+        let target = !prev;
+        let name = name_for_dedupe.clone();
+        let ipc = expect_context::<IpcCtx>();
+        // The browser has already flipped the checkbox on click. On
+        // failure we revert it by hand — `prop:checked` won't re-assert
+        // because `dedup_on` is unchanged when the write never landed.
+        let checkbox = event_target::<leptos::web_sys::HtmlInputElement>(&ev);
+        pending_dedupe.set(true);
+        spawn_local(async move {
+            if let Err(e) = ipc.cron_set_dedupe(&name, target).await {
+                leptos::web_sys::console::warn_1(&format!("cron_set_dedupe failed: {e}").into());
+                checkbox.set_checked(prev);
+            } else {
+                on_change.run(());
+            }
+            pending_dedupe.set(false);
         });
     };
 
@@ -310,6 +338,18 @@ fn CronRow(
                 >
                     { move || if pending_save.get() { "Saving…" } else { "Save" } }
                 </button>
+                <label
+                    class="queue-cron-dedupe"
+                    title="Skip a firing if the previous run is still pending or in progress"
+                >
+                    <input
+                        type="checkbox"
+                        prop:checked=move || dedup_on.get()
+                        on:change=on_dedupe
+                        disabled=move || pending_dedupe.get()
+                    />
+                    "skip if running"
+                </label>
             </div>
 
             { move || save_err.get().map(|e| view! {

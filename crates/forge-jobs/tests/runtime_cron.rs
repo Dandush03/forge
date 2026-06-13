@@ -39,6 +39,7 @@ fn schedule(name: &str, expr: &str) -> NewCronSchedule {
         cron_expr: expr.into(),
         enabled: true,
         max_attempts: Some(3),
+        dedupe_key: None,
     }
 }
 
@@ -124,6 +125,75 @@ async fn fires_one_job_when_schedule_is_due() {
         pending.len(),
         1,
         "expected one pending job after fire; got {pending:?}"
+    );
+}
+
+#[tokio::test]
+async fn dedupe_keyed_schedule_skips_while_a_run_is_in_flight() {
+    let s = fresh().await;
+    let router = DefaultRouter;
+
+    // One schedule carries a dedupe key; an otherwise-identical control
+    // schedule does not.
+    let mut deduped = schedule("deduped", "*/5 * * * * *");
+    deduped.dedupe_key = Some("deduped".into());
+    s.cron.ensure_schedule(deduped).await.expect("ensure dedup");
+    s.cron
+        .ensure_schedule(schedule("plain", "*/5 * * * * *"))
+        .await
+        .expect("ensure plain");
+
+    // Fire both twice, never draining the first job. The dedupe key
+    // collapses the second fire onto the still-pending first; the plain
+    // schedule stacks a second row.
+    let mut reports = Vec::new();
+    for _ in 0..2 {
+        let now = Utc::now();
+        set_next_fire_at(&s, "deduped", now - ChronoDuration::seconds(30)).await;
+        set_next_fire_at(&s, "plain", now - ChronoDuration::seconds(30)).await;
+        reports.push(cron_tick_once(&s, &router, now).await.expect("tick"));
+    }
+
+    // First tick: both schedules enqueue, nothing to collapse onto.
+    assert_eq!(
+        reports[0].fired, 2,
+        "first tick fires both; got {:?}",
+        reports[0]
+    );
+    assert_eq!(
+        reports[0].skipped, 0,
+        "nothing in flight yet; got {:?}",
+        reports[0]
+    );
+    // Second tick: `deduped` collapses (counted as skipped, not fired),
+    // `plain` fires again. A deduped fire enqueues nothing, so counting it
+    // as fired would hide the skip (review L6).
+    assert_eq!(
+        reports[1].fired, 1,
+        "only `plain` fires the 2nd time; got {:?}",
+        reports[1]
+    );
+    assert_eq!(
+        reports[1].skipped, 1,
+        "`deduped` must count as skipped, not fired; got {:?}",
+        reports[1]
+    );
+
+    let pending = s
+        .jobs
+        .list_by_status(None, forge_jobs::JobStatus::Pending, 100)
+        .await
+        .expect("list pending");
+    let count = |kind: &str| pending.iter().filter(|j| j.kind == kind).count();
+    assert_eq!(
+        count("deduped"),
+        1,
+        "dedupe key must collapse the second fire while the first is pending; got {pending:?}"
+    );
+    assert_eq!(
+        count("plain"),
+        2,
+        "no dedupe key → each fire stacks a new row; got {pending:?}"
     );
 }
 

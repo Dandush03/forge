@@ -4,6 +4,8 @@
 both storage adapters (`storage/sqlite/`, `storage/postgres.rs`), plus the
 exposure surfaces in `forge-jobs-api`.
 **Commit:** `4e64db5` · **Date:** 2026-06-10
+**Refreshed:** 2026-06-13 — reviewed the per-schedule cron `dedupe_key`
+(skip-if-in-flight) feature on the uncommitted 0.2.1 diff; appended **L6**.
 **Scope:** correctness, races, failover, cross-replica parity,
 SQLite⇄Postgres parity, scaling, leak/exposure.
 **Out of scope:** style/lint — `clippy -D warnings` and `fmt` are assumed
@@ -260,6 +262,36 @@ default single-process SQLite build say so explicitly; ones marked
 - **Fix:** none required; document, or move `stale_before` computation
   into SQL (`now() - interval`) on PG for one clock domain.
 
+### L6 — A cron fire that collapses on its `dedupe_key` still records as fired — skip-if-in-flight is invisible
+
+- **Where:** `runtime/cron.rs::process_row` (the `storage.jobs.enqueue`
+  match arm) + `try_advance_fire` in both adapters.
+- **Why it matters:** the new per-schedule `dedupe_key` collapses an
+  overlapping fire to a no-op — `JobQueue::enqueue` returns
+  `EnqueueOutcome::Deduped(existing)` and inserts nothing. But
+  `process_row` matches `Ok(_) => report.fired += 1`, so a skip counts as
+  a fire; and `try_advance_fire` has already set `last_fired_at = now` and
+  cleared `last_error` *before* the enqueue runs. The `"cron: firing
+  schedule"` info log also emits unconditionally (it precedes the
+  enqueue). Net: a skipped tick is indistinguishable from a real one —
+  `report.fired` increments, the log says "firing", and the Cron tab shows
+  `last_fired_at` "just now". An operator who turned skip-if-in-flight *on*
+  sees the schedule "firing every tick" while the queue is actually
+  collapsing them; the feature's entire effect is unobservable, and any
+  metric/alert built on the cron fired-count silently inflates. **No
+  queue-correctness impact** — nothing double-runs, nothing is lost, and
+  cadence resumes normally once the in-flight job finishes. Fires on both
+  adapters, single-process SQLite included (it's local outcome-handling,
+  not a race).
+- **Fix:** match the outcome in `process_row` — on
+  `EnqueueOutcome::Deduped` (or `outcome.is_deduped()`) increment a new
+  `CronTickReport::skipped` counter and `tracing::debug!("cron: fire
+  skipped — prior run in flight")` instead of bumping `fired`; reserve
+  `fired` for `Enqueued`. Move the "firing" info log below the enqueue so
+  it reflects the real outcome. Advancing `last_fired_at` on a skip is
+  defensible (the schedule *did* evaluate), so leave the CAS as-is — the
+  fix is purely in the report/log so fired is distinguishable from skipped.
+
 ## Confirmed sound (reviewed, no change needed)
 
 - **Claim atomicity** — both adapters claim via a single-statement
@@ -271,6 +303,17 @@ default single-process SQLite build say so explicitly; ones marked
   active-sibling filter prevents the claim-loop the boot-time
   `cleanup_superseded_retries` unsticks; PG batch requeue pre-filters
   (single-row requeue is M4).
+- **Cron `dedupe_key` wiring (0.2.1)** — `process_row` threads the
+  schedule's stored `dedupe_key` into the `EnqueueRequest`, so an
+  overlapping fire collapses against the same `pending`/`in_progress`
+  predicate as any other dedupe. No new dedupe *mechanism* — it reuses the
+  audited path above, so the atomicity + SQLite⇄Postgres parity carry over
+  unchanged; `enqueue_in_tx` returns `Deduped` identically in both adapters
+  (fast-path pre-check + `ON CONFLICT`/`OR IGNORE` race backstop). The CAS
+  in `try_advance_fire` still fences cross-replica double-fires before the
+  enqueue. Round-trip covered by `cron_ensure_then_list` in both smoke
+  suites and the runtime collapse by `dedupe_keyed_schedule_skips_while_a_run_is_in_flight`.
+  The only gap is observability, not behavior — see **L6**.
 - **Throttle cool-down** — `extend_queue_cooldown` only bumps the
   exponent for the *first* throttle in a window (the `throttled_until <=
   now` predicate is an effective CAS on both backends), the counter is
@@ -349,3 +392,4 @@ default single-process SQLite build say so explicitly; ones marked
 | L3 | fixed | SQLite `clear_queue_cooldown` derives `decay_before` from the passed `now_iso` (one clock domain, matches PG) |
 | L4 | fixed | `JobQueue::delete` returns `DeleteOutcome` {Deleted, CancelRequested, NotFound}; API keeps its `u64` touched-count contract |
 | L5 | fixed | Documented the lease (DB clock) vs pod-liveness (app clock) split + the 60s `STALE_THRESHOLD` drift assumption in `docs/operating-at-scale.md` ("Clock domains"); SQL-domain unification noted there as the future option |
+| L6 | fixed | `process_row` matches the enqueue outcome: `EnqueueOutcome::Deduped` → new `CronTickReport::skipped` counter + `debug!` "fire skipped — prior run still in flight"; `Enqueued` → `fired` + the "fired schedule" info log (moved below the enqueue). `cron: tick` summary surfaces `skipped`. Test `dedupe_keyed_schedule_skips_while_a_run_is_in_flight` asserts the fired/skipped split |
