@@ -84,12 +84,14 @@ pub(crate) mod resources;
 pub(crate) mod scheduled;
 #[allow(unreachable_pub)]
 pub(crate) mod timeline;
+#[allow(unreachable_pub)]
+pub(crate) mod workers;
 
 pub use ipc::{
     CleanupReport, CronSchedule, DbHealthBucket, DbHealthHostSeries, IpcCtx, IpcError,
     JOB_STATUSES, JobInspect, JobRow, JobsEnqueueReq, JobsFilter, JobsPage, MetricSeriesBucket,
     QueueIpc, QueueOverview, QueueProcess, ResourceBucket, ResourceHostSeries, StatusCounts,
-    TimelineBucket,
+    TimelineBucket, Worker, WorkerSlot, WorkersOverview,
 };
 pub use queue_root::QueueRoot;
 

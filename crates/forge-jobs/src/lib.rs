@@ -50,7 +50,8 @@
 //! let storage = DatabaseConfig::load(&paths)?.open_storage(&paths).await?;
 //! let mut handlers = HandlerRegistry::new();
 //! handlers.register(NoopEcho);
-//! let runtime = QueueRuntime::new(storage, handlers, Arc::new(DefaultRouter));
+//! let runtime = QueueRuntime::new(storage, handlers, Arc::new(DefaultRouter))
+//!     .with_queues(["default".to_owned()]); // required: which queues this worker runs
 //! runtime.ensure_queue("default", 2).await?;
 //! runtime
 //!     .enqueue(
@@ -134,18 +135,20 @@ pub use runtime::{
     CmdExecPayload, CronTickReport, DEFAULT_QUEUE_WORKERS, DEFAULT_RATE_LIMIT_SCOPES,
     DEFAULT_SHUTDOWN_TIMEOUT, DefaultRouter, HandlerRegistry, JobCtx, JobHandler, JobOutcome,
     KindPrefixRouter, METRICS_BUCKET_SECS, METRICS_TICK, NOOP_ECHO_KIND, NoopEcho, QueueHandle,
-    QueueRuntime, REAPER_TICK, REBALANCE_TICK, RateLimiter, Router, WorkerPoolConfig,
-    WorkerPoolHandler, cleanup_once, cron_tick_once, ensure_default_rate_limits, ensure_schedules,
-    metrics_roll_once, reap_stale_jobs, rebalance_once,
+    QUEUES_ENV, QueueRuntime, REAPER_TICK, REBALANCE_TICK, RateLimiter, Router, WORKER_NAME_ENV,
+    WorkerPoolConfig, WorkerPoolHandler, cleanup_once, cron_tick_once, ensure_default_rate_limits,
+    ensure_schedules, metrics_roll_once, queues_from_env, reap_stale_jobs, rebalance_once,
+    worker_name_from_env,
 };
 #[cfg(feature = "postgres")]
 pub use storage::PostgresStorage;
 pub use storage::{
     CronScheduleRecord, CronStorage, DeleteOutcome, DrainedSamples, EnqueueOutcome, EnqueueRequest,
     FinalizeOutcome, HeartbeatStatus, JobId, JobLatency, JobQueue, JobRecord, JobStatus,
-    MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord, ProcessRegistry,
-    QueueConfig, QueueConfigRow, QueueCounts, RateLimitOutcome, RateLimitStorage, SqliteStorage,
-    Storage, StorageError, StorageInfo, TimelineEvent, TimelineEventType, metric,
+    MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, PodRecord, ProcessRecord,
+    ProcessRegistry, QueueConfig, QueueConfigRow, QueueCounts, RateLimitOutcome, RateLimitStorage,
+    SlotAssignment, SqliteStorage, Storage, StorageError, StorageInfo, TimelineEvent,
+    TimelineEventType, metric,
 };
 
 /// Format an error with its full `Error::source()` chain as

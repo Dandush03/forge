@@ -71,8 +71,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = /* your QueuePaths impl */;
     let storage = DatabaseConfig::load(&paths)?.open_storage(&paths).await?;
 
-    // Spawn workers (queue background).
-    let runtime = QueueRuntime::new(storage.clone(), HandlerRegistry::new(), Arc::new(forge_jobs::DefaultRouter));
+    // Spawn workers (queue background). `with_queues` declares which
+    // queues this worker consumes — required; read from the env in prod
+    // via `forge_jobs::queues_from_env()`.
+    let runtime = QueueRuntime::new(storage.clone(), HandlerRegistry::new(), Arc::new(forge_jobs::DefaultRouter))
+        .with_queues(["default".to_owned()]);
     runtime.ensure_queue("default", 4).await?;
     let _handle = runtime.start().await?;
 

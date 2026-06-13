@@ -47,6 +47,8 @@ fn fair_shares(total: usize, pods: usize) -> Vec<usize> {
 pub(super) async fn pod_heartbeat_loop(
     storage: Storage,
     host_id: String,
+    worker_name: Option<String>,
+    queues: Vec<String>,
     shutdown: CancellationToken,
 ) {
     let mut tick = tokio::time::interval(super::SUPERVISOR_TICK);
@@ -56,7 +58,11 @@ pub(super) async fn pod_heartbeat_loop(
             biased;
             () = shutdown.cancelled() => return,
             _ = tick.tick() => {
-                if let Err(e) = storage.procs.pod_heartbeat(&host_id).await {
+                if let Err(e) = storage
+                    .procs
+                    .pod_heartbeat(&host_id, worker_name.as_deref(), &queues)
+                    .await
+                {
                     tracing::warn!(?e, %host_id, "rebalance: pod heartbeat failed");
                 }
             }
@@ -106,12 +112,33 @@ pub async fn rebalance_once(storage: &Storage) -> crate::storage::error::Result<
     }
     let queues = storage.config.list_queues().await?;
     for q in queues {
+        // Only pods that *declared* this queue are eligible to run it.
+        // A pod with an empty queue set (a stale pre-upgrade row) is
+        // eligible for nothing. Pods sort by host_id from list_live_pods,
+        // so fair_shares' remainder distribution stays deterministic.
+        let eligible: Vec<&str> = pods
+            .iter()
+            .filter(|p| p.queues.iter().any(|name| name == &q.name))
+            .map(|p| p.host_id.as_str())
+            .collect();
         let total = usize::try_from(q.max_workers).unwrap_or(0);
-        let shares = fair_shares(total, pods.len());
-        for (host, slots) in pods.iter().zip(shares) {
+        let shares = fair_shares(total, eligible.len());
+        for (host, slots) in eligible.iter().zip(shares) {
             let slots = i32::try_from(slots).unwrap_or(0);
             if let Err(e) = storage.procs.set_slots(&q.name, host, slots).await {
                 tracing::warn!(?e, queue = %q.name, %host, "rebalance: set_slots failed");
+            }
+        }
+        // Zero out live pods that are NOT eligible for this queue but may
+        // still carry a stale assignment (e.g. redeployed without it), so
+        // their supervisor — if any lingered — winds down and the
+        // monitoring view doesn't show phantom slots.
+        for p in &pods {
+            if eligible.iter().any(|h| *h == p.host_id) {
+                continue;
+            }
+            if let Err(e) = storage.procs.set_slots(&q.name, &p.host_id, 0).await {
+                tracing::warn!(?e, queue = %q.name, host = %p.host_id, "rebalance: zero set_slots failed");
             }
         }
     }

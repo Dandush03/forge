@@ -35,7 +35,7 @@ use serde_json::json;
 use crate::ipc::{
     CleanupReport, CronSchedule, DbHealthHostSeries, IpcError, JobInspect, JobRow, JobsEnqueueReq,
     JobsFilter, JobsPage, MetricSeriesBucket, QueueIpc, QueueOverview, QueueProcess,
-    ResourceHostSeries, TimelineBucket,
+    ResourceHostSeries, TimelineBucket, WorkersOverview,
 };
 
 /// Reads the current bearer token (e.g. from `localStorage`) fresh on
@@ -196,6 +196,10 @@ impl QueueIpc for HttpQueueIpc {
             .map(|n| vec![("queue_name", n.to_owned())])
             .unwrap_or_default();
         self.get("/queue/processes", &q).await
+    }
+
+    async fn queue_workers(&self) -> Result<WorkersOverview, IpcError> {
+        self.get("/queue/workers", &[]).await
     }
 
     async fn queue_timeline_range(

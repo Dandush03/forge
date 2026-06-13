@@ -372,6 +372,41 @@ pub struct ProcessRecord {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// PodRecord — one live worker process (pod) in the cluster
+// ────────────────────────────────────────────────────────────────────
+
+/// A worker process's cluster-level identity, published on every pod
+/// heartbeat. Distinct from [`ProcessRecord`] (one row per worker *slot*):
+/// a pod has one `PodRecord` and N `ProcessRecord`s.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PodRecord {
+    pub host_id: String,
+    /// Optional human-friendly label (`FORGE_WORKER_NAME`). `None` →
+    /// callers fall back to `host_id` for display.
+    #[serde(default)]
+    pub worker_name: Option<String>,
+    /// Queues this worker is responsible for. New workers always declare
+    /// at least one; an empty set only appears for a stale pre-upgrade
+    /// row and is treated as "eligible for no queue".
+    #[serde(default)]
+    pub queues: Vec<String>,
+    pub heartbeat_at: DateTime<Utc>,
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SlotAssignment — one (queue, pod) worker-count allocation
+// ────────────────────────────────────────────────────────────────────
+
+/// The rebalancer's per-(queue, pod) worker-count allocation. Read by the
+/// monitoring view to show how many slots each worker runs per queue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlotAssignment {
+    pub queue_name: String,
+    pub host_id: String,
+    pub slots: i32,
+}
+
+// ────────────────────────────────────────────────────────────────────
 // QueueConfigRow — one row in the per-queue config table
 // ────────────────────────────────────────────────────────────────────
 

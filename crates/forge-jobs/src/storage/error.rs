@@ -16,6 +16,11 @@ pub enum StorageError {
     #[error("invalid input: {0}")]
     InvalidInput(String),
 
+    /// Runtime/process misconfiguration detected at startup (e.g. a
+    /// worker started without declaring any queues). Not retryable.
+    #[error("config: {0}")]
+    Config(String),
+
     #[error("not found: {0}")]
     NotFound(String),
 

@@ -7,7 +7,9 @@
 //! JSON whichever transport it talks to.
 
 use chrono::{DateTime, Utc};
-use forge_jobs::{JobRecord, ProcessRecord, QueueConfigRow, QueueCounts};
+use forge_jobs::{
+    JobRecord, PodRecord, ProcessRecord, QueueConfigRow, QueueCounts, SlotAssignment,
+};
 use serde::{Deserialize, Serialize};
 
 /// One queue's snapshot for the Mission Control overview card.
@@ -101,6 +103,103 @@ pub fn overview_dto(
         backoff_max_seconds: u32::try_from(cfg.backoff_max_seconds).unwrap_or(1800),
         throttled_until: cfg.throttled_until,
         oldest_pending_age_seconds,
+    }
+}
+
+// ── workers (pods) ───────────────────────────────────────────────────
+
+/// One worker process (pod) for the worker-centric health view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct WorkerDto {
+    pub host_id: String,
+    /// Human-friendly label (`FORGE_WORKER_NAME`); `None` → UI shows `host_id`.
+    pub worker_name: Option<String>,
+    /// Queues this worker declared responsibility for.
+    pub queues: Vec<String>,
+    /// Rebalancer-assigned slot counts per queue (only non-zero ones).
+    pub slots: Vec<WorkerSlotDto>,
+    /// Live worker-slot rows (`queue_process`) for this host.
+    pub workers_live: u32,
+    /// Of those, how many are running a job right now.
+    pub in_flight: u32,
+    pub heartbeat_at: DateTime<Utc>,
+    /// Age of the last heartbeat in seconds (drives the health dot).
+    pub heartbeat_age_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct WorkerSlotDto {
+    pub queue_name: String,
+    pub slots: i32,
+}
+
+/// `GET /queue/workers` response — every live worker plus any queues no
+/// live worker is covering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct WorkersOverviewDto {
+    pub workers: Vec<WorkerDto>,
+    /// Configured queues that no live worker declared — their jobs won't
+    /// run until a worker picks them up. Surfaced as a warning banner.
+    pub unassigned_queues: Vec<String>,
+}
+
+/// Assemble the worker view from the storage-layer pieces. The handler
+/// gathers the inputs (live pods, all process rows, slot assignments,
+/// configured queue names) and this folds them into the wire shape.
+#[must_use]
+pub fn workers_overview_dto(
+    pods: Vec<PodRecord>,
+    processes: &[ProcessRecord],
+    slots: &[SlotAssignment],
+    queue_names: &[String],
+    now: DateTime<Utc>,
+) -> WorkersOverviewDto {
+    let workers = pods
+        .into_iter()
+        .map(|pod| {
+            let host_procs = processes.iter().filter(|p| p.host_id == pod.host_id);
+            let workers_live = host_procs.clone().count();
+            let in_flight = host_procs.filter(|p| p.current_job.is_some()).count();
+            let slots = slots
+                .iter()
+                .filter(|s| s.host_id == pod.host_id && s.slots > 0)
+                .map(|s| WorkerSlotDto {
+                    queue_name: s.queue_name.clone(),
+                    slots: s.slots,
+                })
+                .collect();
+            let heartbeat_age_seconds =
+                u64::try_from((now - pod.heartbeat_at).num_seconds().max(0)).unwrap_or(0);
+            WorkerDto {
+                host_id: pod.host_id,
+                worker_name: pod.worker_name,
+                queues: pod.queues,
+                slots,
+                workers_live: u32::try_from(workers_live).unwrap_or(u32::MAX),
+                in_flight: u32::try_from(in_flight).unwrap_or(u32::MAX),
+                heartbeat_at: pod.heartbeat_at,
+                heartbeat_age_seconds,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // A queue is unassigned when no live worker declared it.
+    let unassigned_queues = queue_names
+        .iter()
+        .filter(|name| {
+            !workers
+                .iter()
+                .any(|w| w.queues.iter().any(|q| q == *name))
+        })
+        .cloned()
+        .collect();
+
+    WorkersOverviewDto {
+        workers,
+        unassigned_queues,
     }
 }
 

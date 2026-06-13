@@ -1,9 +1,7 @@
 # forge
+### Forge is a Kubernetes-ready control plane for Rust background work — queues, task engines, workers, metrics, and UI, from embedded apps to multi-replica services.
 
-A small family of Rust crates for building production job queues and the UI
-to run them. Extracted from a real Tauri desktop app — every crate has been
-running in production against ~2K Slack threads + GitHub issues for months
-before being broken out.
+A small family of Rust crates for building production job queues and the UI to run them.
 
 ## Screenshots
 
@@ -52,6 +50,12 @@ curve (`backoff_enabled` / `base_seconds` / `max_seconds`). Edits take
 effect on the next tick — no worker restart.
 
 ![Queues tab](docs/screenshots/queues_tab.png)
+
+**Workers** — worker-centric health, one card per live process. Shows each
+worker's name (`FORGE_WORKER_NAME`, else its host id), the queues it
+declared responsibility for, the rebalancer-assigned slots per queue, its
+live / in-flight worker counts, and a heartbeat-health dot. A red banner
+flags any configured queue that no live worker is consuming.
 
 ### Detail panels
 
@@ -136,7 +140,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage = DatabaseConfig::load(&paths)?.open_storage(&paths).await?;
     let mut handlers = HandlerRegistry::new();
     handlers.register(NoopEcho);
-    let runtime = QueueRuntime::new(storage, handlers, Arc::new(DefaultRouter));
+    // Declare which queues THIS worker consumes — required. A worker
+    // started with none fails at `start()`. Read them from the
+    // environment in a real host: `.with_queues(forge_jobs::queues_from_env())`.
+    let runtime = QueueRuntime::new(storage, handlers, Arc::new(DefaultRouter))
+        .with_queues(["default".to_owned()]);
     runtime.ensure_queue("default", 2).await?;
     let handle = runtime.start().await?;
     // ... handle.shutdown_graceful(timeout) at exit
@@ -241,6 +249,43 @@ backend-choice threshold, the vacuum/bloat tuning (and how to apply
 `fillfactor` to an already-populated table), connection-pool sizing, the
 single-coordinator background-work ceiling, and rate-limit-scope
 contention.
+
+### Per-worker queue affinity — many workers, one pane of glass
+
+Point every worker at the **same database** and give each its own
+responsibility. Workers can be entirely **different binaries** — `tom` is
+your image-processing service, `jerry` is your email service — and they
+still show up in a single **unified Mission Control**, because the database
+is the source of truth and the UI/API read the whole cluster from it.
+
+```
+   FORGE_QUEUES=images          FORGE_QUEUES=email
+   FORGE_WORKER_NAME=tom        FORGE_WORKER_NAME=jerry
+   ┌──────────────────┐         ┌──────────────────┐
+   │ worker: tom      │         │ worker: jerry    │      ┌─────────────────┐
+   │ (image binary)   │         │ (email binary)   │      │ Mission Control │
+   │ handlers: image_*│         │ handlers: email_*│      │  Workers / Jobs │
+   └────────┬─────────┘         └────────┬─────────┘      │  Overview / Cron│
+            │                            │                └────────┬────────┘
+            └──────────────┬─────────────┴─────────── reads ───────┘
+                           ▼
+                  ┌──────────────────┐
+                  │  shared Postgres │   ← single source of truth
+                  └──────────────────┘
+```
+
+A worker declares the queues it consumes via `FORGE_QUEUES=images` (or
+`.with_queues([...])`). The cluster honors it end-to-end — a worker only
+spawns supervisors for its queues, and the coordinator's rebalancer splits
+each queue's `max_workers` across only the workers that declared it. Name
+workers with `FORGE_WORKER_NAME` and watch their health on the **Workers**
+tab; a queue no live worker declared is flagged as **unassigned**.
+
+**The one rule:** a worker can only run a job kind it registered a handler
+for, so its `FORGE_QUEUES` must line up with the handlers compiled into that
+binary — route `image_*` jobs to the `images` queue, and only the image
+worker declares `images`. Declaring queues is required: a worker started
+without any fails fast rather than silently draining every queue.
 
 ## Repository layout
 

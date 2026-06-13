@@ -40,6 +40,7 @@ pub fn build(storage: Arc<Storage>) -> Router {
         // queue reads
         .route("/queue/overview", get(queue_overview_route))
         .route("/queue/processes", get(queue_processes_route))
+        .route("/queue/workers", get(queue_workers_route))
         .route("/queue/timeline", get(queue_timeline_route))
         .route("/queue/metric-series", get(queue_metric_series_route))
         .route("/queue/resource-series", get(queue_resource_series_route))
@@ -126,6 +127,12 @@ async fn queue_processes_route(
     handlers::queue_processes(&storage, q.queue_name.as_deref())
         .await
         .map(Json)
+}
+
+async fn queue_workers_route(
+    State(storage): State<Arc<Storage>>,
+) -> Result<Json<dto::WorkersOverviewDto>, Error> {
+    handlers::queue_workers(&storage).await.map(Json)
 }
 
 async fn queue_timeline_route(

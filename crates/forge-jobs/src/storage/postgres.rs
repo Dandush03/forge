@@ -55,8 +55,8 @@ use super::error::{Result, StorageError};
 use super::event_buffer::{EventBuffer, EventRecord};
 use super::types::{
     CronScheduleRecord, EnqueueOutcome, EnqueueRequest, ErrorHistoryEntry, FinalizeOutcome, JobId,
-    JobLatency, JobRecord, JobStatus, MetricBucket, NewCronSchedule, ProcessRecord, QueueConfigRow,
-    QueueCounts, TimelineEvent, TimelineEventType, metric,
+    JobLatency, JobRecord, JobStatus, MetricBucket, NewCronSchedule, PodRecord, ProcessRecord,
+    QueueConfigRow, QueueCounts, SlotAssignment, TimelineEvent, TimelineEventType, metric,
 };
 use super::{
     CronStorage, DeleteOutcome, ERROR_HISTORY_CAP, HeartbeatStatus, JobQueue, ProcessRegistry,
@@ -1566,34 +1566,74 @@ impl ProcessRegistry for PostgresStorage {
         Ok(res.rows_affected())
     }
 
-    async fn pod_heartbeat(&self, host: &str) -> Result<()> {
+    async fn pod_heartbeat(
+        &self,
+        host: &str,
+        worker_name: Option<&str>,
+        queues: &[String],
+    ) -> Result<()> {
         // Runtime clock (bound), not DB now(), to match queue_process
         // and the runtime-computed cutoff in list_live_pods / reap_stale.
         // Mixing a DB-written timestamp with a runtime-computed cutoff
         // would misjudge liveness under clock skew. (Leadership uses the
         // DB clock end-to-end — see try_cron_lease — which is the
         // skew-immune path that actually needs it.)
+        let queues_csv = encode_queues(queues);
         sqlx::query(
-            r"INSERT INTO pod (host_id, heartbeat_at) VALUES ($1, $2)
-              ON CONFLICT (host_id) DO UPDATE SET heartbeat_at = EXCLUDED.heartbeat_at",
+            r"INSERT INTO pod (host_id, heartbeat_at, worker_name, queues)
+              VALUES ($1, $2, $3, $4)
+              ON CONFLICT (host_id) DO UPDATE
+                SET heartbeat_at = EXCLUDED.heartbeat_at,
+                    worker_name  = EXCLUDED.worker_name,
+                    queues       = EXCLUDED.queues",
         )
         .bind(host)
         .bind(Utc::now())
+        .bind(worker_name)
+        .bind(queues_csv)
         .execute(&self.pool)
         .await
         .map_err(map_sqlx_err)?;
         Ok(())
     }
 
-    async fn list_live_pods(&self, stale_before: DateTime<Utc>) -> Result<Vec<String>> {
-        let rows =
-            sqlx::query("SELECT host_id FROM pod WHERE heartbeat_at >= $1 ORDER BY host_id ASC")
-                .bind(stale_before)
-                .fetch_all(&self.pool)
-                .await
-                .map_err(map_sqlx_err)?;
+    async fn list_live_pods(&self, stale_before: DateTime<Utc>) -> Result<Vec<PodRecord>> {
+        let rows = sqlx::query(
+            "SELECT host_id, worker_name, queues, heartbeat_at FROM pod
+              WHERE heartbeat_at >= $1 ORDER BY host_id ASC",
+        )
+        .bind(stale_before)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
         rows.iter()
-            .map(|r| r.try_get::<String, _>("host_id").map_err(map_sqlx_err))
+            .map(|r| {
+                Ok(PodRecord {
+                    host_id: r.try_get("host_id").map_err(map_sqlx_err)?,
+                    worker_name: r.try_get("worker_name").map_err(map_sqlx_err)?,
+                    queues: decode_queues(r.try_get("queues").map_err(map_sqlx_err)?),
+                    heartbeat_at: r.try_get("heartbeat_at").map_err(map_sqlx_err)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn list_slot_assignments(&self) -> Result<Vec<SlotAssignment>> {
+        let rows = sqlx::query(
+            "SELECT queue_name, host_id, slots FROM pod_slot_assignment
+              ORDER BY host_id ASC, queue_name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+        rows.iter()
+            .map(|r| {
+                Ok(SlotAssignment {
+                    queue_name: r.try_get("queue_name").map_err(map_sqlx_err)?,
+                    host_id: r.try_get("host_id").map_err(map_sqlx_err)?,
+                    slots: r.try_get::<i32, _>("slots").map_err(map_sqlx_err)?,
+                })
+            })
             .collect()
     }
 
@@ -2322,6 +2362,24 @@ fn row_to_proc(r: &sqlx::postgres::PgRow) -> Result<ProcessRecord> {
             .map_err(map_sqlx_err)?
             .map(JobId::new),
     })
+}
+
+/// Encode a pod's declared queues for the `pod.queues` CSV column.
+/// Empty slice → `None` (NULL), matching the `SQLite` adapter.
+fn encode_queues(queues: &[String]) -> Option<String> {
+    if queues.is_empty() {
+        None
+    } else {
+        Some(queues.join(","))
+    }
+}
+
+/// Decode the `pod.queues` CSV column. NULL/empty → empty vec.
+fn decode_queues(csv: Option<String>) -> Vec<String> {
+    match csv {
+        Some(s) if !s.is_empty() => s.split(',').map(str::to_owned).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn row_to_queue_config(r: &sqlx::postgres::PgRow) -> Result<QueueConfigRow> {

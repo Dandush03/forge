@@ -67,7 +67,8 @@ async fn boot_with_sleepy_handler() -> (JobStorage, QueueRuntime) {
         .expect("ensure_queue");
     let mut handlers = HandlerRegistry::new();
     handlers.register(SleepyHandler);
-    let runtime = QueueRuntime::new(storage.clone(), handlers, Arc::new(DefaultRouter));
+    let runtime = QueueRuntime::new(storage.clone(), handlers, Arc::new(DefaultRouter))
+        .with_queues(["default".to_owned()]);
     (storage, runtime)
 }
 

@@ -599,15 +599,27 @@ async fn cron_lease_elects_single_leader() {
 #[tokio::test]
 async fn pod_presence_and_slot_assignment_roundtrip() {
     let b = bootstrap().await;
-    // Two pods announce presence.
-    b.storage.pod_heartbeat("pod-a").await.unwrap();
-    b.storage.pod_heartbeat("pod-b").await.unwrap();
+    // Two pods announce presence, each with a name + declared queues.
+    b.storage
+        .pod_heartbeat("pod-a", Some("tom"), &["gh".to_owned()])
+        .await
+        .unwrap();
+    b.storage
+        .pod_heartbeat("pod-b", None, &["default".to_owned()])
+        .await
+        .unwrap();
     let live = b
         .storage
         .list_live_pods(Utc::now() - chrono::Duration::seconds(60))
         .await
         .unwrap();
-    assert_eq!(live, vec!["pod-a".to_owned(), "pod-b".to_owned()]);
+    let hosts: Vec<&str> = live.iter().map(|p| p.host_id.as_str()).collect();
+    assert_eq!(hosts, vec!["pod-a", "pod-b"]);
+    // Identity + queues round-trip.
+    assert_eq!(live[0].worker_name.as_deref(), Some("tom"));
+    assert_eq!(live[0].queues, vec!["gh".to_owned()]);
+    assert_eq!(live[1].worker_name, None);
+    assert_eq!(live[1].queues, vec!["default".to_owned()]);
 
     // No assignment yet → None (supervisor falls back to the total).
     assert_eq!(b.storage.get_slots("gh", "pod-a").await.unwrap(), None);
@@ -615,6 +627,13 @@ async fn pod_presence_and_slot_assignment_roundtrip() {
     b.storage.set_slots("gh", "pod-a", 5).await.unwrap();
     b.storage.set_slots("gh", "pod-a", 4).await.unwrap();
     assert_eq!(b.storage.get_slots("gh", "pod-a").await.unwrap(), Some(4));
+    // list_slot_assignments surfaces the written row.
+    let slots = b.storage.list_slot_assignments().await.unwrap();
+    assert!(
+        slots
+            .iter()
+            .any(|s| s.queue_name == "gh" && s.host_id == "pod-a" && s.slots == 4)
+    );
 
     // delete_for_host clears presence + assignments (graceful deregister).
     b.storage.delete_for_host("pod-a").await.unwrap();
@@ -623,7 +642,8 @@ async fn pod_presence_and_slot_assignment_roundtrip() {
         .list_live_pods(Utc::now() - chrono::Duration::seconds(60))
         .await
         .unwrap();
-    assert_eq!(live, vec!["pod-b".to_owned()]);
+    let hosts: Vec<&str> = live.iter().map(|p| p.host_id.as_str()).collect();
+    assert_eq!(hosts, vec!["pod-b"]);
     assert_eq!(b.storage.get_slots("gh", "pod-a").await.unwrap(), None);
 }
 

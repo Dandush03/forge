@@ -72,6 +72,37 @@ use crate::storage::types::{
 /// most catch-all kinds are I/O-bound rather than CPU-bound.
 pub const DEFAULT_QUEUE_WORKERS: &[(&str, i32)] = &[("default", 1), ("gh", 3), ("slack", 2)];
 
+/// Env var naming the comma-separated queues a worker consumes.
+pub const QUEUES_ENV: &str = "FORGE_QUEUES";
+/// Env var giving a worker its human-friendly monitoring label.
+pub const WORKER_NAME_ENV: &str = "FORGE_WORKER_NAME";
+
+/// Parse [`QUEUES_ENV`] (`FORGE_QUEUES=gh,slack`) into a queue list.
+///
+/// For [`QueueRuntime::with_queues`]. Whitespace is trimmed and blanks
+/// dropped. Returns an empty vec when unset — `start()` then rejects it,
+/// surfacing the misconfiguration rather than silently running nothing.
+#[must_use]
+pub fn queues_from_env() -> Vec<String> {
+    std::env::var(QUEUES_ENV)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Read [`WORKER_NAME_ENV`] for [`QueueRuntime::with_worker_name`].
+/// `None` when unset/blank.
+#[must_use]
+pub fn worker_name_from_env() -> Option<String> {
+    std::env::var(WORKER_NAME_ENV)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+}
+
 const SUPERVISOR_TICK: Duration = Duration::from_secs(1);
 /// Worker idle-poll fallback when the storage's `wait_for_work`
 /// returns without a notify (timeout). 500 ms keeps a missed wake
@@ -133,6 +164,15 @@ pub struct QueueRuntime {
     /// Constructed once at `new()` so the per-scope refill-rate
     /// cache lives across every worker's `JobCtx` borrow.
     rate_limit: Arc<RateLimiter>,
+    /// Queues this worker is responsible for. **Required** — `start()`
+    /// errors if empty. Set via [`QueueRuntime::with_queues`] /
+    /// [`queues_from_env`]. The supervisor spawns one loop per queue
+    /// here; the rebalancer only hands this pod slots for these queues.
+    queues: Vec<String>,
+    /// Optional human-friendly label for this worker (`FORGE_WORKER_NAME`),
+    /// surfaced in the monitoring view. `None` → display falls back to
+    /// `host_id`.
+    worker_name: Option<String>,
 }
 
 impl std::fmt::Debug for QueueRuntime {
@@ -161,7 +201,33 @@ impl QueueRuntime {
             host_id: Ulid::new().to_string(),
             running_jobs: Arc::new(Mutex::new(HashMap::new())),
             rate_limit,
+            queues: Vec::new(),
+            worker_name: None,
         }
+    }
+
+    /// Declare the queues this worker is responsible for. **Required** —
+    /// a worker that declares none fails at [`start`](Self::start).
+    /// Names are de-duplicated, preserving first-seen order. Only
+    /// supervisors for these queues are spawned, and the rebalancer only
+    /// hands this pod slots for them.
+    #[must_use]
+    pub fn with_queues(mut self, queues: impl IntoIterator<Item = String>) -> Self {
+        let mut seen = std::collections::HashSet::new();
+        self.queues = queues
+            .into_iter()
+            .filter(|q| !q.is_empty() && seen.insert(q.clone()))
+            .collect();
+        self
+    }
+
+    /// Set a human-friendly label for this worker, shown in the
+    /// monitoring view. Unset → the view falls back to `host_id`.
+    #[must_use]
+    pub fn with_worker_name(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        self.worker_name = (!name.is_empty()).then_some(name);
+        self
     }
 
     /// Ensure a queue config row exists. Safe to call before or after
@@ -188,16 +254,35 @@ impl QueueRuntime {
     /// Spawn one supervisor per registered queue + reaper + cleanup
     /// + cron. Returns a [`QueueHandle`] for orchestration.
     pub async fn start(self) -> Result<QueueHandle> {
-        let queues = self.storage.config.list_queues().await?;
+        // Declaring queues is mandatory — running every queue implicitly
+        // is no longer supported (a worker now owns an explicit subset so
+        // the cluster can split responsibilities). Fail fast and loud.
+        if self.queues.is_empty() {
+            return Err(crate::storage::error::StorageError::Config(
+                "no queues declared: set FORGE_QUEUES or call QueueRuntime::with_queues — \
+                 running all queues implicitly is no longer supported"
+                    .to_owned(),
+            ));
+        }
+
         let shutdown = CancellationToken::new();
         let mut join_set = JoinSet::new();
 
-        for q in queues {
+        for name in &self.queues {
+            // Make sure the config row exists so the supervisor has a
+            // max_workers/paused row to read even on a fresh DB. Seed
+            // from the well-known defaults when we recognize the queue,
+            // else 1.
+            let default_workers = DEFAULT_QUEUE_WORKERS
+                .iter()
+                .find_map(|(q, n)| (*q == name).then_some(*n))
+                .unwrap_or(1);
+            self.storage.config.ensure_queue(name, default_workers).await?;
             join_set.spawn(supervisor_loop(
                 self.storage.clone(),
                 self.handlers.clone(),
                 self.router.clone(),
-                q.name,
+                name.clone(),
                 self.host_id.clone(),
                 self.running_jobs.clone(),
                 self.rate_limit.clone(),
@@ -223,6 +308,8 @@ impl QueueRuntime {
         join_set.spawn(rebalance::pod_heartbeat_loop(
             self.storage.clone(),
             self.host_id.clone(),
+            self.worker_name.clone(),
+            self.queues.clone(),
             shutdown.clone(),
         ));
         join_set.spawn(rebalance::rebalance_loop(
@@ -468,33 +555,35 @@ async fn resolve_target(storage: &Storage, queue_name: &str, host_id: &str) -> O
     // the estimate. On SQLite the lone live pod estimates the whole total.
     let raw = match storage.procs.get_slots(queue_name, host_id).await {
         Ok(Some(slots)) => usize::try_from(slots).unwrap_or(0),
-        Ok(None) => fair_fallback(storage, q.max_workers).await,
+        Ok(None) => fair_fallback(storage, queue_name, q.max_workers).await,
         Err(e) => {
             tracing::warn!(queue = %queue_name, ?e, "supervisor: slot lookup failed; estimating fair share");
-            fair_fallback(storage, q.max_workers).await
+            fair_fallback(storage, queue_name, q.max_workers).await
         }
     };
     Some(raw.min(WORKER_CAP))
 }
 
 /// Fair-share worker estimate for a pod that has no slot assignment yet.
-/// `max_workers` is the cluster total; divide by the live-pod count
-/// (rounded up so the fleet never *under*-serves the total), clamped to
-/// ≥1 pod. Used only on the rare unassigned / rebalancer-down path, so
-/// the extra `list_live_pods` read isn't on the steady per-tick path.
-async fn fair_fallback(storage: &Storage, max_workers: i32) -> usize {
+/// `max_workers` is the cluster total; divide by the count of live pods
+/// *eligible for this queue* (those that declared it) — rounded up so the
+/// fleet never *under*-serves the total, clamped to ≥1 pod. Counting only
+/// eligible pods mirrors the rebalancer: if just one pod runs `gh`, it
+/// estimates the whole `gh` total rather than a fraction. Used only on the
+/// rare unassigned / rebalancer-down path, so the extra `list_live_pods`
+/// read isn't on the steady per-tick path.
+async fn fair_fallback(storage: &Storage, queue_name: &str, max_workers: i32) -> usize {
     let total = usize::try_from(max_workers).unwrap_or(0);
     if total == 0 {
         return 0;
     }
     let stale_before = Utc::now() - STALE_THRESHOLD;
-    let pods = storage
-        .procs
-        .list_live_pods(stale_before)
-        .await
-        .map_or(1, |p| p.len())
-        .max(1);
-    total.div_ceil(pods)
+    let eligible = storage.procs.list_live_pods(stale_before).await.map_or(1, |pods| {
+        pods.iter()
+            .filter(|p| p.queues.iter().any(|q| q == queue_name))
+            .count()
+    });
+    total.div_ceil(eligible.max(1))
 }
 
 fn scale_down(workers: &mut HashMap<usize, WorkerSlot>, target: usize) {

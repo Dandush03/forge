@@ -60,8 +60,9 @@ pub use postgres::PostgresStorage;
 pub use sqlite::SqliteStorage;
 pub use types::{
     CronScheduleRecord, EnqueueOutcome, EnqueueRequest, FinalizeOutcome, JobId, JobLatency,
-    JobRecord, JobStatus, MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, ProcessRecord,
-    QueueConfigRow, QueueCounts, TimelineEvent, TimelineEventType, metric,
+    JobRecord, JobStatus, MetricBucket, NewCronSchedule, NewJob, PROCESS_WIDE_QUEUE, PodRecord,
+    ProcessRecord, QueueConfigRow, QueueCounts, SlotAssignment, TimelineEvent, TimelineEventType,
+    metric,
 };
 
 use std::sync::Arc;
@@ -449,15 +450,26 @@ pub trait ProcessRegistry: Send + Sync + std::fmt::Debug {
 
     // ── cluster rebalancing ──────────────────────────────────────────
 
-    /// Record this pod's liveness (upsert `heartbeat_at = now`). A pod
-    /// heartbeats its own existence independent of workers so the
-    /// rebalancer can see it even when it's been assigned 0 slots.
-    async fn pod_heartbeat(&self, host: &str) -> Result<()>;
+    /// Record this pod's liveness (upsert `heartbeat_at = now`) along
+    /// with its identity (`worker_name`) and the `queues` it consumes. A
+    /// pod heartbeats its own existence independent of workers so the
+    /// rebalancer can see it — and which queues it's eligible for — even
+    /// when it's been assigned 0 slots.
+    async fn pod_heartbeat(
+        &self,
+        host: &str,
+        worker_name: Option<&str>,
+        queues: &[String],
+    ) -> Result<()>;
 
-    /// Sorted `host_id`s of pods whose `pod.heartbeat_at >=
-    /// stale_before`. The rebalancer splits each queue's `max_workers`
-    /// across exactly this set.
-    async fn list_live_pods(&self, stale_before: DateTime<Utc>) -> Result<Vec<String>>;
+    /// Pods (sorted by `host_id`) whose `pod.heartbeat_at >= stale_before`.
+    /// The rebalancer splits each queue's `max_workers` across the live
+    /// pods that declared that queue; the monitoring view lists them.
+    async fn list_live_pods(&self, stale_before: DateTime<Utc>) -> Result<Vec<PodRecord>>;
+
+    /// Every (queue, pod) slot allocation written by the rebalancer.
+    /// Used by the worker-centric monitoring view.
+    async fn list_slot_assignments(&self) -> Result<Vec<SlotAssignment>>;
 
     /// Write a pod's worker allocation for a queue (upsert). The
     /// rebalancer leader calls this; each supervisor reads its own row.

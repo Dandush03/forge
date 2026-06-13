@@ -80,6 +80,50 @@ const fn default_backoff_max() -> i32 {
     1800
 }
 
+/// One rebalancer-assigned slot count for a worker, by queue.
+#[derive(Clone, Debug, Deserialize)]
+pub struct WorkerSlot {
+    pub queue_name: String,
+    #[serde(default)]
+    pub slots: i32,
+}
+
+/// One worker process (pod) for the Workers health view.
+#[derive(Clone, Debug, Deserialize)]
+pub struct Worker {
+    pub host_id: String,
+    #[serde(default)]
+    pub worker_name: Option<String>,
+    #[serde(default)]
+    pub queues: Vec<String>,
+    #[serde(default)]
+    pub slots: Vec<WorkerSlot>,
+    #[serde(default)]
+    pub workers_live: u32,
+    #[serde(default)]
+    pub in_flight: u32,
+    pub heartbeat_at: DateTime<Utc>,
+    #[serde(default)]
+    pub heartbeat_age_seconds: u64,
+}
+
+impl Worker {
+    /// Display name — the human-friendly label if set, else the host id.
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        self.worker_name.as_deref().unwrap_or(&self.host_id)
+    }
+}
+
+/// `queue_workers` response — live workers plus any queues none cover.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct WorkersOverview {
+    #[serde(default)]
+    pub workers: Vec<Worker>,
+    #[serde(default)]
+    pub unassigned_queues: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct JobRow {
     pub id: String,
@@ -404,6 +448,10 @@ pub trait QueueIpc: Send + Sync + 'static {
         &self,
         queue_name: Option<&str>,
     ) -> Result<Vec<QueueProcess>, IpcError>;
+    /// Worker-centric health view: one entry per live worker process
+    /// (its declared queues, assigned slots, live/in-flight counts,
+    /// heartbeat age) plus any configured queue no live worker covers.
+    async fn queue_workers(&self) -> Result<WorkersOverview, IpcError>;
     /// Bucketed enqueue/completion/failure counts across the half-open
     /// `[from, to)` range at the given granularity. Buckets are aligned
     /// to `from` (not wall-clock) and walk forward in `bucket_secs`

@@ -7,7 +7,7 @@ use sqlx::Row;
 use super::{SqliteStorage, map_sqlx_err};
 use crate::storage::ProcessRegistry;
 use crate::storage::error::{Result, StorageError};
-use crate::storage::types::{JobId, ProcessRecord};
+use crate::storage::types::{JobId, PodRecord, ProcessRecord, SlotAssignment};
 
 #[async_trait]
 impl ProcessRegistry for SqliteStorage {
@@ -138,29 +138,61 @@ impl ProcessRegistry for SqliteStorage {
         Ok(res.rows_affected())
     }
 
-    async fn pod_heartbeat(&self, host: &str) -> Result<()> {
+    async fn pod_heartbeat(
+        &self,
+        host: &str,
+        worker_name: Option<&str>,
+        queues: &[String],
+    ) -> Result<()> {
         let now = iso(Utc::now());
+        let queues_csv = encode_queues(queues);
         sqlx::query(
-            r"INSERT INTO pod (host_id, heartbeat_at) VALUES (?1, ?2)
-              ON CONFLICT(host_id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at",
+            r"INSERT INTO pod (host_id, heartbeat_at, worker_name, queues)
+              VALUES (?1, ?2, ?3, ?4)
+              ON CONFLICT(host_id) DO UPDATE
+                SET heartbeat_at = excluded.heartbeat_at,
+                    worker_name  = excluded.worker_name,
+                    queues       = excluded.queues",
         )
         .bind(host)
         .bind(&now)
+        .bind(worker_name)
+        .bind(queues_csv)
         .execute(&self.write_pool)
         .await
         .map_err(map_sqlx_err)?;
         Ok(())
     }
 
-    async fn list_live_pods(&self, stale_before: DateTime<Utc>) -> Result<Vec<String>> {
-        let rows =
-            sqlx::query("SELECT host_id FROM pod WHERE heartbeat_at >= ?1 ORDER BY host_id ASC")
-                .bind(iso(stale_before))
-                .fetch_all(&self.read_pool)
-                .await
-                .map_err(map_sqlx_err)?;
+    async fn list_live_pods(&self, stale_before: DateTime<Utc>) -> Result<Vec<PodRecord>> {
+        let rows = sqlx::query(
+            "SELECT host_id, worker_name, queues, heartbeat_at FROM pod
+              WHERE heartbeat_at >= ?1 ORDER BY host_id ASC",
+        )
+        .bind(iso(stale_before))
+        .fetch_all(&self.read_pool)
+        .await
+        .map_err(map_sqlx_err)?;
+        rows.iter().map(row_to_pod).collect()
+    }
+
+    async fn list_slot_assignments(&self) -> Result<Vec<SlotAssignment>> {
+        let rows = sqlx::query(
+            "SELECT queue_name, host_id, slots FROM pod_slot_assignment
+              ORDER BY host_id ASC, queue_name ASC",
+        )
+        .fetch_all(&self.read_pool)
+        .await
+        .map_err(map_sqlx_err)?;
         rows.iter()
-            .map(|r| r.try_get::<String, _>("host_id").map_err(map_sqlx_err))
+            .map(|r| {
+                Ok(SlotAssignment {
+                    queue_name: r.try_get("queue_name").map_err(map_sqlx_err)?,
+                    host_id: r.try_get("host_id").map_err(map_sqlx_err)?,
+                    slots: i32::try_from(r.try_get::<i64, _>("slots").map_err(map_sqlx_err)?)
+                        .unwrap_or(0),
+                })
+            })
             .collect()
     }
 
@@ -202,6 +234,37 @@ impl ProcessRegistry for SqliteStorage {
 
 fn iso(dt: DateTime<Utc>) -> String {
     dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+/// Encode a pod's declared queues for the `pod.queues` CSV column.
+/// Empty slice → `None` (NULL) so a stale pre-upgrade row and a
+/// genuinely-empty set read back identically as "no queues".
+fn encode_queues(queues: &[String]) -> Option<String> {
+    if queues.is_empty() {
+        None
+    } else {
+        Some(queues.join(","))
+    }
+}
+
+/// Decode the `pod.queues` CSV column. NULL/empty → empty vec.
+fn decode_queues(csv: Option<String>) -> Vec<String> {
+    match csv {
+        Some(s) if !s.is_empty() => s.split(',').map(str::to_owned).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn row_to_pod(r: &sqlx::sqlite::SqliteRow) -> Result<PodRecord> {
+    let heartbeat_at: String = r.try_get("heartbeat_at").map_err(map_sqlx_err)?;
+    Ok(PodRecord {
+        host_id: r.try_get("host_id").map_err(map_sqlx_err)?,
+        worker_name: r.try_get("worker_name").map_err(map_sqlx_err)?,
+        queues: decode_queues(r.try_get("queues").map_err(map_sqlx_err)?),
+        heartbeat_at: DateTime::parse_from_rfc3339(&heartbeat_at)
+            .map(|d| d.with_timezone(&Utc))
+            .map_err(|e| StorageError::Backend(format!("bad datetime {heartbeat_at:?}: {e}")))?,
+    })
 }
 
 fn row_to_proc(r: &sqlx::sqlite::SqliteRow) -> Result<ProcessRecord> {

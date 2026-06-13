@@ -41,7 +41,8 @@ async fn runtime_runs_one_noop_echo_job_to_done() {
 
     let mut handlers = HandlerRegistry::new();
     handlers.register(NoopEcho);
-    let runtime = QueueRuntime::new(storage.clone(), handlers, Arc::new(DefaultRouter));
+    let runtime = QueueRuntime::new(storage.clone(), handlers, Arc::new(DefaultRouter))
+        .with_queues(["default".to_owned()]);
 
     // ── enqueue + start ────────────────────────────────────────────
     let outcome = runtime

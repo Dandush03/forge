@@ -109,9 +109,12 @@ shape:
 2. `DatabaseConfig::load(&paths)?.open_storage(&paths).await?`
 3. Build a `HandlerRegistry`, `register` your handlers
 4. `QueueRuntime::new(storage, handlers, router)`
-5. `runtime.ensure_queue("default", N).await?` for each queue you'll use
-6. `runtime.enqueue(req).await?` to seed work
-7. `runtime.start().await?` to spawn workers; keep the `QueueHandle`
+5. `.with_queues([...])` — declare the queues this worker consumes
+   (required; or `queues_from_env()` to read `FORGE_QUEUES`). Optionally
+   `.with_worker_name(...)` for a friendly label on the Workers view.
+6. `runtime.ensure_queue("default", N).await?` for each queue you'll use
+7. `runtime.enqueue(req).await?` to seed work
+8. `runtime.start().await?` to spawn workers; keep the `QueueHandle`
    so you can `shutdown_graceful(...)` at exit
 
 ## Handler cancellation contract

@@ -45,6 +45,7 @@ use crate::per_queue::PerQueueMetrics;
 use crate::resources::ResourcesPanel;
 use crate::scheduled::ScheduledTab;
 use crate::timeline::Timeline;
+use crate::workers::WorkersTab;
 
 /// Initial poll cadence for the Overview tab's `queue_overview` fetch.
 /// Users override this via the header's refresh-interval selector;
@@ -71,10 +72,11 @@ enum Tab {
     Dead,
     Cron,
     Queues,
+    Workers,
 }
 
 impl Tab {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Overview,
         Self::Jobs,
         Self::Scheduled,
@@ -82,6 +84,7 @@ impl Tab {
         Self::Dead,
         Self::Cron,
         Self::Queues,
+        Self::Workers,
     ];
 
     const fn label(self) -> &'static str {
@@ -93,6 +96,7 @@ impl Tab {
             Self::Dead => "Dead",
             Self::Cron => "Cron",
             Self::Queues => "Queues",
+            Self::Workers => "Workers",
         }
     }
 }
@@ -311,6 +315,7 @@ pub fn QueueRoot() -> impl IntoView {
                     }.into_any(),
                     Tab::Cron      => view! { <CronTab /> }.into_any(),
                     Tab::Queues    => queues_tab(queues, editing, on_change).into_any(),
+                    Tab::Workers   => view! { <WorkersTab /> }.into_any(),
                 }}
             </div>
 

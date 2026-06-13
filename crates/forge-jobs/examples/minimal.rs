@@ -61,11 +61,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Build the runtime. The router decides which queue an
     //    enqueued kind lands on when the caller doesn't pin one;
-    //    DefaultRouter sends everything to "default".
-    let runtime = QueueRuntime::new(storage, handlers, Arc::new(DefaultRouter));
+    //    DefaultRouter sends everything to "default". `with_queues`
+    //    declares which queues THIS worker consumes — it's required
+    //    (a worker with none fails at start). A real host typically
+    //    reads it from the environment via `queues_from_env()`.
+    let runtime = QueueRuntime::new(storage, handlers, Arc::new(DefaultRouter))
+        .with_queues(["default".to_owned()]);
 
     // 4. Make sure the "default" queue config row exists. ensure_queue
     //    is idempotent — calling it on every boot is the expected pattern.
+    //    (start() also ensures rows for every declared queue.)
     runtime.ensure_queue("default", 2).await?;
 
     // 5. Seed one job.

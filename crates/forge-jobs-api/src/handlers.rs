@@ -22,7 +22,8 @@ use crate::Error;
 use crate::dto::{
     CleanupReportDto, CronScheduleDto, DbHealthHostSeries, JobInspectDto, JobRowDto,
     JobsEnqueueRequest, JobsListArgs, JobsPageDto, MetricSeriesBucket, QueueOverviewDto,
-    QueueProcessDto, ResourceHostSeries, StorageInfoDto, TimelineBucket, overview_dto,
+    QueueProcessDto, ResourceHostSeries, StorageInfoDto, TimelineBucket, WorkersOverviewDto,
+    overview_dto, workers_overview_dto,
 };
 use crate::series;
 
@@ -64,6 +65,38 @@ pub async fn queue_processes(
 ) -> Result<Vec<QueueProcessDto>, Error> {
     let rows = storage.procs.list(queue_name).await?;
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+/// Liveness window for the worker view. Matches the runtime's 60s reap
+/// horizon — a pod stale past this is reaped from the `pod` table, so a
+/// wider window wouldn't surface more rows.
+const WORKER_LIVENESS_SECS: i64 = 60;
+
+/// `GET /queue/workers` — the worker-centric health view.
+///
+/// One entry per live worker process (pod) with its declared queues,
+/// assigned slots, live/in-flight counts and heartbeat health, plus any
+/// configured queue no live worker is covering.
+pub async fn queue_workers(storage: &Storage) -> Result<WorkersOverviewDto, Error> {
+    let now = Utc::now();
+    let stale_before = now - chrono::Duration::seconds(WORKER_LIVENESS_SECS);
+    let pods = storage.procs.list_live_pods(stale_before).await?;
+    let processes = storage.procs.list(None).await?;
+    let slots = storage.procs.list_slot_assignments().await?;
+    let queue_names: Vec<String> = storage
+        .config
+        .list_queues()
+        .await?
+        .into_iter()
+        .map(|q| q.name)
+        .collect();
+    Ok(workers_overview_dto(
+        pods,
+        &processes,
+        &slots,
+        &queue_names,
+        now,
+    ))
 }
 
 /// `GET /storage/info` — adapter identifier + key/value facts.
