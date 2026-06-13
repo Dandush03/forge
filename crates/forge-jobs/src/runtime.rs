@@ -269,6 +269,11 @@ impl QueueRuntime {
         let mut join_set = JoinSet::new();
 
         for name in &self.queues {
+            // A queue name is round-tripped through the `pod.queues` CSV
+            // column, so it must not contain the ',' delimiter (else it
+            // would decode into phantom queues). Reject at the declaration
+            // gate rather than corrupting silently downstream.
+            crate::storage::types::validate_queue_name(name)?;
             // Make sure the config row exists so the supervisor has a
             // max_workers/paused row to read even on a fresh DB. Seed
             // from the well-known defaults when we recognize the queue,

@@ -44,6 +44,21 @@ async fn start_without_declared_queues_errors() {
 }
 
 #[tokio::test]
+async fn start_with_comma_in_queue_name_errors() {
+    // A comma is the `pod.queues` CSV delimiter — a name containing one
+    // would decode into phantom queues, so it's rejected at start().
+    let sqlite = Arc::new(SqliteStorage::open_in_memory().await.unwrap());
+    let storage = JobStorage::from_one(sqlite);
+    let rt = runtime(&storage, &["orders,eu"]);
+
+    let err = rt.start().await.expect_err("must reject a comma in a queue name");
+    assert!(
+        matches!(err, StorageError::InvalidInput(_)),
+        "expected InvalidInput, got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn workers_only_run_their_declared_queues() {
     let sqlite = Arc::new(SqliteStorage::open_in_memory().await.unwrap());
     let storage = JobStorage::from_one(sqlite);

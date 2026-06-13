@@ -411,6 +411,52 @@ impl PodRecord {
     }
 }
 
+/// Encode a pod's declared queues for the `pod.queues` CSV column. Empty
+/// slice → `None` (NULL) so a stale pre-upgrade row and a genuinely-empty
+/// set read back identically as "no queues". Shared by both storage
+/// adapters so the encoding contract is defined exactly once.
+///
+/// Queue names must not contain `,` (the delimiter); this is enforced
+/// upstream by [`validate_queue_name`] at the declaration boundary, so a
+/// comma can't reach the round-trip and split into phantom queues.
+#[must_use]
+pub(crate) fn encode_queues(queues: &[String]) -> Option<String> {
+    if queues.is_empty() {
+        None
+    } else {
+        Some(queues.join(","))
+    }
+}
+
+/// Decode the `pod.queues` CSV column. NULL/empty → empty vec.
+#[must_use]
+pub(crate) fn decode_queues(csv: Option<String>) -> Vec<String> {
+    match csv {
+        Some(s) if !s.is_empty() => s.split(',').map(str::to_owned).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Reject a queue name that can't round-trip through the `pod.queues` CSV
+/// column. A comma is the CSV delimiter, so a name containing one would
+/// decode into multiple phantom queues; an empty name has no meaning.
+///
+/// # Errors
+/// [`StorageError::InvalidInput`] if `name` is empty or contains `,`.
+pub(crate) fn validate_queue_name(name: &str) -> super::error::Result<()> {
+    if name.is_empty() {
+        return Err(super::error::StorageError::InvalidInput(
+            "queue name must not be empty".to_owned(),
+        ));
+    }
+    if name.contains(',') {
+        return Err(super::error::StorageError::InvalidInput(format!(
+            "queue name {name:?} must not contain ',' (reserved as the queues CSV delimiter)"
+        )));
+    }
+    Ok(())
+}
+
 // ────────────────────────────────────────────────────────────────────
 // SlotAssignment — one (queue, pod) worker-count allocation
 // ────────────────────────────────────────────────────────────────────

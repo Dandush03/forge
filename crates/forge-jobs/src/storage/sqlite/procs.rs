@@ -7,7 +7,9 @@ use sqlx::Row;
 use super::{SqliteStorage, map_sqlx_err};
 use crate::storage::ProcessRegistry;
 use crate::storage::error::{Result, StorageError};
-use crate::storage::types::{JobId, PodRecord, ProcessRecord, SlotAssignment};
+use crate::storage::types::{
+    JobId, PodRecord, ProcessRecord, SlotAssignment, decode_queues, encode_queues,
+};
 
 #[async_trait]
 impl ProcessRegistry for SqliteStorage {
@@ -234,25 +236,6 @@ impl ProcessRegistry for SqliteStorage {
 
 fn iso(dt: DateTime<Utc>) -> String {
     dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-}
-
-/// Encode a pod's declared queues for the `pod.queues` CSV column.
-/// Empty slice → `None` (NULL) so a stale pre-upgrade row and a
-/// genuinely-empty set read back identically as "no queues".
-fn encode_queues(queues: &[String]) -> Option<String> {
-    if queues.is_empty() {
-        None
-    } else {
-        Some(queues.join(","))
-    }
-}
-
-/// Decode the `pod.queues` CSV column. NULL/empty → empty vec.
-fn decode_queues(csv: Option<String>) -> Vec<String> {
-    match csv {
-        Some(s) if !s.is_empty() => s.split(',').map(str::to_owned).collect(),
-        _ => Vec::new(),
-    }
 }
 
 fn row_to_pod(r: &sqlx::sqlite::SqliteRow) -> Result<PodRecord> {

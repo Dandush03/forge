@@ -56,7 +56,8 @@ use super::event_buffer::{EventBuffer, EventRecord};
 use super::types::{
     CronScheduleRecord, EnqueueOutcome, EnqueueRequest, ErrorHistoryEntry, FinalizeOutcome, JobId,
     JobLatency, JobRecord, JobStatus, MetricBucket, NewCronSchedule, PodRecord, ProcessRecord,
-    QueueConfigRow, QueueCounts, SlotAssignment, TimelineEvent, TimelineEventType, metric,
+    QueueConfigRow, QueueCounts, SlotAssignment, TimelineEvent, TimelineEventType, decode_queues,
+    encode_queues, metric,
 };
 use super::{
     CronStorage, DeleteOutcome, ERROR_HISTORY_CAP, HeartbeatStatus, JobQueue, ProcessRegistry,
@@ -2362,24 +2363,6 @@ fn row_to_proc(r: &sqlx::postgres::PgRow) -> Result<ProcessRecord> {
             .map_err(map_sqlx_err)?
             .map(JobId::new),
     })
-}
-
-/// Encode a pod's declared queues for the `pod.queues` CSV column.
-/// Empty slice → `None` (NULL), matching the `SQLite` adapter.
-fn encode_queues(queues: &[String]) -> Option<String> {
-    if queues.is_empty() {
-        None
-    } else {
-        Some(queues.join(","))
-    }
-}
-
-/// Decode the `pod.queues` CSV column. NULL/empty → empty vec.
-fn decode_queues(csv: Option<String>) -> Vec<String> {
-    match csv {
-        Some(s) if !s.is_empty() => s.split(',').map(str::to_owned).collect(),
-        _ => Vec::new(),
-    }
 }
 
 fn row_to_queue_config(r: &sqlx::postgres::PgRow) -> Result<QueueConfigRow> {
