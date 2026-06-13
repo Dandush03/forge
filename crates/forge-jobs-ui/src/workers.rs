@@ -57,18 +57,49 @@ pub fn WorkersTab() -> impl IntoView {
         });
     }
 
-    // Poll on the panel-wide cadence.
-    let poll_ms = use_context::<PollIntervalMs>().map_or(2_000, |p| p.0.get_untracked());
+    // Poll on the panel-wide cadence, re-installing the timer whenever the
+    // operator changes it. Reading the value once via `get_untracked` (as
+    // this did before) pinned the tab to its mount-time cadence and ignored
+    // later changes — mirror the Overview poller in queue_root.rs instead:
+    // direct setup at mount, an Effect that re-tracks `poll_ms` for changes.
+    let interval_slot =
+        StoredValue::new(Option::<leptos::leptos_dom::helpers::IntervalHandle>::None);
     let refresh_for_timer = refresh.clone();
-    let handle = (poll_ms > 0)
-        .then(|| {
-            set_interval_with_handle(refresh_for_timer, Duration::from_millis(poll_ms)).ok()
-        })
-        .flatten();
+    let install_timer = move |ms: u64| {
+        let refresh = refresh_for_timer.clone();
+        interval_slot.update_value(|slot| {
+            if let Some(prev) = slot.take() {
+                prev.clear();
+            }
+            if ms == 0 {
+                return;
+            }
+            if let Ok(h) = set_interval_with_handle(refresh, Duration::from_millis(ms)) {
+                *slot = Some(h);
+            }
+        });
+    };
+
+    let poll_ms = use_context::<PollIntervalMs>().map(|p| p.0);
+    install_timer(poll_ms.map_or(2_000, |s| s.get_untracked()));
+    // Re-install on cadence change. The first pass (`prev == None`) only
+    // registers the `poll_ms` dependency; the mount-time install above
+    // already owns the initial timer, so skipping it avoids a duplicate.
+    if let Some(poll_ms) = poll_ms {
+        let install_for_effect = install_timer.clone();
+        Effect::new(move |prev: Option<()>| {
+            let ms = poll_ms.get();
+            if prev.is_some() {
+                install_for_effect(ms);
+            }
+        });
+    }
     on_cleanup(move || {
-        if let Some(h) = handle {
-            h.clear();
-        }
+        interval_slot.update_value(|slot| {
+            if let Some(h) = slot.take() {
+                h.clear();
+            }
+        });
     });
 
     view! {
