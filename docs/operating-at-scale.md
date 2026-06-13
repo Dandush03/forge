@@ -212,3 +212,11 @@ well under 60s — i.e. any NTP-synced fleet — this is a non-issue. If you
 ever debug a pod flapping in and out of the live set under unusually
 loose clocks, suspect drift between those two domains; moving the
 staleness horizons into SQL (`now() - interval`) would unify them.
+
+The **Workers** tab's heartbeat-age dot has the same shape: the age is
+`api_host_now - pod.heartbeat_at`, where `heartbeat_at` was stamped on the
+*worker* pod's clock and `now` is read on the *API* host's clock. Under
+app↔app drift a healthy worker can briefly read amber/red (age inflated)
+or a just-dead one stay green (negative age, clamped to 0). Cosmetic and
+self-correcting; the same NTP assumption applies. Deriving `now` from the
+DB clock in the `/queue/workers` handler would collapse it to one domain.

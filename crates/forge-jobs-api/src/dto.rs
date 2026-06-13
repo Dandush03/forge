@@ -180,6 +180,10 @@ pub fn workers_overview_dto(
                     slots: s.slots,
                 })
                 .collect();
+            // `now` is the API host's clock; `heartbeat_at` was stamped on
+            // the worker pod's clock. Under app↔app drift the age can skew
+            // (negative is clamped to 0) — cosmetic, see the "Clock domains"
+            // note in docs/operating-at-scale.md.
             let heartbeat_age_seconds =
                 u64::try_from((now - pod.heartbeat_at).num_seconds().max(0)).unwrap_or(0);
             WorkerDto {
