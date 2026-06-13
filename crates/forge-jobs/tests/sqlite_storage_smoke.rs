@@ -982,6 +982,7 @@ async fn cron_ensure_then_list() {
         cron_expr: "0 30 * * * Mon-Fri".into(),
         enabled: true,
         max_attempts: Some(3),
+        dedupe_key: None,
     })
     .await
     .unwrap();
@@ -989,6 +990,23 @@ async fn cron_ensure_then_list() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "tickets_sync");
     assert!(rows[0].enabled);
+    assert_eq!(rows[0].dedupe_key, None, "dedupe defaults off");
+
+    // set_dedupe_key round-trips; clearing returns to None.
+    s.set_dedupe_key("tickets_sync", Some("tickets_sync".into()))
+        .await
+        .unwrap();
+    let row = CronStorage::get_schedule(&*s, "tickets_sync")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.dedupe_key.as_deref(), Some("tickets_sync"));
+    s.set_dedupe_key("tickets_sync", None).await.unwrap();
+    let row = CronStorage::get_schedule(&*s, "tickets_sync")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.dedupe_key, None);
 }
 
 #[tokio::test]

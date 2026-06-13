@@ -314,6 +314,10 @@ pub struct CronScheduleDto {
     pub cron_expr: String,
     pub enabled: bool,
     pub max_attempts: Option<i32>,
+    /// When set, each firing dedupes against it (skip-if-in-flight). The
+    /// panel surfaces this as a checkbox; the key is the schedule name.
+    #[serde(default)]
+    pub dedupe_key: Option<String>,
     pub last_fired_at: Option<DateTime<Utc>>,
     pub next_fire_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
@@ -331,6 +335,7 @@ impl From<forge_jobs::CronScheduleRecord> for CronScheduleDto {
             cron_expr: r.cron_expr,
             enabled: r.enabled,
             max_attempts: r.max_attempts,
+            dedupe_key: r.dedupe_key,
             last_fired_at: r.last_fired_at,
             next_fire_at: r.next_fire_at,
             last_error: r.last_error,
@@ -420,6 +425,14 @@ pub struct CronSetEnabledRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronSetExprRequest {
     pub expr: String,
+}
+
+/// Request body for `POST /cron/{name}/dedupe`. A boolean toggle: `true`
+/// sets the schedule's dedupe key to its name (skip-if-in-flight), `false`
+/// clears it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronSetDedupeRequest {
+    pub dedupe: bool,
 }
 
 /// Request body for `POST /jobs/enqueue` — the generic typed enqueue.

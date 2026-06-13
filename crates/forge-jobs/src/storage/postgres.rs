@@ -1740,8 +1740,8 @@ impl CronStorage for PostgresStorage {
         sqlx::query(
             r"INSERT INTO cron_schedule (
                 name, kind, payload, queue_name, cron_expr, enabled,
-                max_attempts, created_at, updated_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+                max_attempts, dedupe_key, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
               ON CONFLICT (name) DO NOTHING",
         )
         .bind(&schedule.name)
@@ -1751,6 +1751,7 @@ impl CronStorage for PostgresStorage {
         .bind(&schedule.cron_expr)
         .bind(schedule.enabled)
         .bind(schedule.max_attempts)
+        .bind(schedule.dedupe_key.as_deref())
         .bind(now)
         .execute(&self.pool)
         .await
@@ -1878,6 +1879,21 @@ impl CronStorage for PostgresStorage {
                WHERE name = $3",
         )
         .bind(expr)
+        .bind(Utc::now())
+        .bind(name)
+        .execute(&self.pool)
+        .await
+        .map_err(map_sqlx_err)?;
+        Ok(())
+    }
+
+    async fn set_dedupe_key(&self, name: &str, dedupe_key: Option<String>) -> Result<()> {
+        sqlx::query(
+            r"UPDATE cron_schedule
+                 SET dedupe_key = $1, updated_at = $2
+               WHERE name = $3",
+        )
+        .bind(dedupe_key.as_deref())
         .bind(Utc::now())
         .bind(name)
         .execute(&self.pool)
@@ -2333,6 +2349,7 @@ fn row_to_cron(r: &sqlx::postgres::PgRow) -> Result<CronScheduleRecord> {
         cron_expr: r.try_get("cron_expr").map_err(map_sqlx_err)?,
         enabled: r.try_get("enabled").map_err(map_sqlx_err)?,
         max_attempts: r.try_get("max_attempts").map_err(map_sqlx_err)?,
+        dedupe_key: r.try_get("dedupe_key").map_err(map_sqlx_err)?,
         last_fired_at: r.try_get("last_fired_at").map_err(map_sqlx_err)?,
         next_fire_at: r.try_get("next_fire_at").map_err(map_sqlx_err)?,
         last_error: r.try_get("last_error").map_err(map_sqlx_err)?,

@@ -407,6 +407,14 @@ impl QueueIpc for HttpQueueIpc {
             .await
     }
 
+    async fn cron_set_dedupe(&self, name: &str, dedupe: bool) -> Result<(), IpcError> {
+        self.post_unit(
+            &format!("/cron/{name}/dedupe"),
+            &json!({ "dedupe": dedupe }),
+        )
+        .await
+    }
+
     async fn cron_trigger_now(&self, name: &str) -> Result<String, IpcError> {
         self.post(&format!("/cron/{name}/trigger"), &json!({}))
             .await

@@ -393,8 +393,8 @@ pub trait JobQueue: Send + Sync + std::fmt::Debug {
     }
 
     /// Flush this adapter's buffered `queue_event` rows to storage.
-    /// Timeline events are buffered in-process (see
-    /// [`event_buffer`](crate::storage::event_buffer)) and written in
+    /// Timeline events are buffered in-process (see the
+    /// `event_buffer` module) and written in
     /// batches by the runtime's `event_flush_loop`, keeping them off the
     /// hot enqueue / claim / finalize transactions. Called once per flush
     /// tick and once more on graceful shutdown. Returns the number of
@@ -552,6 +552,12 @@ pub trait CronStorage: Send + Sync + std::fmt::Debug {
     async fn set_enabled(&self, name: &str, enabled: bool) -> Result<()>;
 
     async fn set_expr(&self, name: &str, expr: &str) -> Result<()>;
+
+    /// Set (or clear, with `None`) the schedule's dedupe key. When set,
+    /// each firing enqueues with this key so a tick landing while the
+    /// previous run is still active collapses to a no-op. Convention:
+    /// the schedule `name`. See [`NewCronSchedule::dedupe_key`].
+    async fn set_dedupe_key(&self, name: &str, dedupe_key: Option<String>) -> Result<()>;
 
     /// Delete the named schedule row. Idempotent — no-op when the
     /// row doesn't exist. Used by host crates to clean up defunct

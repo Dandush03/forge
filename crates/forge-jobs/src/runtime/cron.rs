@@ -44,6 +44,11 @@ const CRON_MIN_SLEEP: Duration = Duration::from_millis(500);
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CronTickReport {
     pub fired: u64,
+    /// Fires that collapsed on the schedule's `dedupe_key` because a
+    /// previous run was still pending or in progress (skip-if-in-flight).
+    /// Counted separately from `fired` so the skip is visible — a deduped
+    /// fire enqueues nothing.
+    pub skipped: u64,
     pub seeded: u64,
     pub errors: u64,
     /// Soonest upcoming fire across all enabled schedules after this
@@ -148,7 +153,6 @@ async fn process_row(
                     return Some(next);
                 }
             }
-            tracing::info!(name = row.name, kind = row.kind, "cron: firing schedule");
             let queue_name = row.queue_name.clone().map_or_else(
                 || Cow::Borrowed(router.route(row.kind.as_str())),
                 Cow::Owned,
@@ -157,13 +161,32 @@ async fn process_row(
                 kind: Cow::Owned(row.kind.clone()),
                 payload: row.payload.clone(),
                 queue_name: Some(queue_name),
-                dedupe_key: None,
+                // Skip-if-in-flight: when the schedule carries a dedupe
+                // key, a tick that fires while the previous run is still
+                // active collapses to a no-op rather than stacking the
+                // queue. `None` preserves the fire-every-tick default.
+                dedupe_key: row.dedupe_key.clone(),
                 max_attempts: row.max_attempts,
                 run_at: None,
                 priority: 0,
             };
             match storage.jobs.enqueue(req).await {
-                Ok(_) => report.fired += 1,
+                // Skip-if-in-flight collapsed this fire onto a still-active
+                // run — nothing was enqueued, so it's a skip, not a fire.
+                // Counting it as `fired` would make the feature invisible
+                // in the tick report and any cron metric built on it.
+                Ok(o) if o.is_deduped() => {
+                    report.skipped += 1;
+                    tracing::debug!(
+                        name = row.name,
+                        existing = %o.id(),
+                        "cron: fire skipped — prior run still in flight"
+                    );
+                }
+                Ok(_) => {
+                    report.fired += 1;
+                    tracing::info!(name = row.name, kind = row.kind, "cron: fired schedule");
+                }
                 Err(e) => {
                     tracing::warn!(name = row.name, error = %e, "cron: enqueue failed");
                     report.errors += 1;
@@ -228,9 +251,14 @@ pub(super) async fn cron_loop(
                 let now = Utc::now();
                 let report = match cron_tick_once(&storage, router.as_ref(), now).await {
                     Ok(report) => {
-                        if report.fired > 0 || report.seeded > 0 || report.errors > 0 {
+                        if report.fired > 0
+                            || report.skipped > 0
+                            || report.seeded > 0
+                            || report.errors > 0
+                        {
                             tracing::info!(
                                 fired = report.fired,
+                                skipped = report.skipped,
                                 seeded = report.seeded,
                                 errors = report.errors,
                                 "cron: tick"

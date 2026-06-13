@@ -1153,6 +1153,18 @@
   letter-spacing: 0.04em;
   min-width: 60px;
 }
+.queue-cron-dedupe {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.queue-cron-dedupe input {
+  cursor: pointer;
+}
 .queue-cron-expr-input {
   flex: 1;
   background: var(--bg);

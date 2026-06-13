@@ -625,6 +625,15 @@ pub async fn cron_set_expr(storage: &Storage, name: &str, expr: &str) -> Result<
     Ok(())
 }
 
+/// `POST /cron/{name}/dedupe` — toggle skip-if-in-flight. `true` sets the
+/// schedule's dedupe key to its name (so a tick landing while the previous
+/// run is still active is a no-op); `false` clears it.
+pub async fn cron_set_dedupe(storage: &Storage, name: &str, dedupe: bool) -> Result<(), Error> {
+    let key = dedupe.then(|| name.to_string());
+    storage.cron.set_dedupe_key(name, key).await?;
+    Ok(())
+}
+
 /// `POST /cron/{name}/trigger` — fire a schedule immediately. Returns
 /// the enqueued job id.
 pub async fn cron_trigger_now(storage: &Storage, name: &str) -> Result<String, Error> {

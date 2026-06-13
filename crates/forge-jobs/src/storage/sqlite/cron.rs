@@ -18,8 +18,8 @@ impl CronStorage for SqliteStorage {
         sqlx::query(
             r"INSERT INTO cron_schedule (
                 name, kind, payload, queue_name, cron_expr, enabled,
-                max_attempts, created_at, updated_at
-              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+                max_attempts, dedupe_key, created_at, updated_at
+              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
               ON CONFLICT(name) DO NOTHING",
         )
         .bind(&schedule.name)
@@ -29,6 +29,7 @@ impl CronStorage for SqliteStorage {
         .bind(&schedule.cron_expr)
         .bind(i64::from(schedule.enabled))
         .bind(schedule.max_attempts.map(i64::from))
+        .bind(schedule.dedupe_key.as_deref())
         .bind(&now)
         .execute(&self.write_pool)
         .await
@@ -160,6 +161,22 @@ impl CronStorage for SqliteStorage {
         Ok(())
     }
 
+    async fn set_dedupe_key(&self, name: &str, dedupe_key: Option<String>) -> Result<()> {
+        let now = iso(Utc::now());
+        sqlx::query(
+            r"UPDATE cron_schedule
+                 SET dedupe_key = ?1, updated_at = ?2
+               WHERE name = ?3",
+        )
+        .bind(dedupe_key.as_deref())
+        .bind(&now)
+        .bind(name)
+        .execute(&self.write_pool)
+        .await
+        .map_err(map_sqlx_err)?;
+        Ok(())
+    }
+
     async fn delete_schedule(&self, name: &str) -> Result<()> {
         sqlx::query("DELETE FROM cron_schedule WHERE name = ?1")
             .bind(name)
@@ -227,6 +244,7 @@ fn row_to_cron(r: &sqlx::sqlite::SqliteRow) -> Result<CronScheduleRecord> {
             .try_get::<Option<i64>, _>("max_attempts")
             .map_err(map_sqlx_err)?
             .map(|n| i32::try_from(n).unwrap_or(5)),
+        dedupe_key: r.try_get("dedupe_key").map_err(map_sqlx_err)?,
         last_fired_at: r
             .try_get::<Option<String>, _>("last_fired_at")
             .map_err(map_sqlx_err)?
