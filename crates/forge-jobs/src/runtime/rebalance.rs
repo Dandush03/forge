@@ -111,6 +111,25 @@ pub async fn rebalance_once(storage: &Storage) -> crate::storage::error::Result<
         return Ok(());
     }
     let queues = storage.config.list_queues().await?;
+    let assignments_snapshot = storage.procs.list_slot_assignments().await;
+    // Snapshot current assignments once so the zero-out pass below only
+    // writes pods that actually carry a positive stale slot — without this,
+    // every non-eligible (queue, pod) pair got a no-op `set_slots(…, 0)`
+    // every tick (O(pods × queues) redundant upserts in steady state). The
+    // assign pass only touches eligible pods, so this pre-assign snapshot
+    // stays accurate for the non-eligible pods the zero-out targets. A read
+    // failure just defers zeroing to the next tick; assigns still run.
+    let positive: std::collections::HashSet<(&str, &str)> = match assignments_snapshot {
+        Ok(ref a) => a
+            .iter()
+            .filter(|s| s.slots > 0)
+            .map(|s| (s.queue_name.as_str(), s.host_id.as_str()))
+            .collect(),
+        Err(ref e) => {
+            tracing::warn!(?e, "rebalance: slot-assignment read failed; skipping zero-out this tick");
+            std::collections::HashSet::new()
+        }
+    };
     for q in queues {
         // Only pods eligible for this queue run it (declared it, or a
         // legacy empty-set pod mid-rollout — see PodRecord::handles). Pods
@@ -139,12 +158,17 @@ pub async fn rebalance_once(storage: &Storage) -> crate::storage::error::Result<
                 tracing::warn!(?e, queue = %q.name, %host, "rebalance: set_slots failed");
             }
         }
-        // Zero out live pods that are NOT eligible for this queue but may
-        // still carry a stale assignment (e.g. redeployed without it), so
-        // their supervisor — if any lingered — winds down and the
-        // monitoring view doesn't show phantom slots.
+        // Zero out live pods that are NOT eligible for this queue but still
+        // carry a *positive* stale assignment (e.g. redeployed without the
+        // queue), so their supervisor — if any lingered — winds down and the
+        // monitoring view doesn't show phantom slots. Pods with no row or an
+        // already-zero row are left untouched (a non-eligible pod has no
+        // supervisor for this queue, so absent and 0 are equivalent).
         for p in &pods {
             if eligible.iter().any(|h| *h == p.host_id) {
+                continue;
+            }
+            if !positive.contains(&(q.name.as_str(), p.host_id.as_str())) {
                 continue;
             }
             if let Err(e) = storage.procs.set_slots(&q.name, &p.host_id, 0).await {

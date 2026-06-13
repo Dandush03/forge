@@ -79,12 +79,13 @@ async fn only_pods_that_declared_the_queue_get_slots() {
 
     rebalance_once(&s).await.unwrap();
 
-    // All of gh goes to tom; jerry isn't eligible (and is zeroed).
+    // All of gh goes to tom; jerry isn't eligible → serves 0 (left
+    // unassigned rather than written to an explicit 0).
     assert_eq!(s.procs.get_slots("gh", "tom").await.unwrap(), Some(4));
-    assert_eq!(s.procs.get_slots("gh", "jerry").await.unwrap(), Some(0));
-    // All of default goes to jerry; tom isn't eligible (and is zeroed).
+    assert_eq!(s.procs.get_slots("gh", "jerry").await.unwrap().unwrap_or(0), 0);
+    // All of default goes to jerry; tom isn't eligible → serves 0.
     assert_eq!(s.procs.get_slots("default", "jerry").await.unwrap(), Some(2));
-    assert_eq!(s.procs.get_slots("default", "tom").await.unwrap(), Some(0));
+    assert_eq!(s.procs.get_slots("default", "tom").await.unwrap().unwrap_or(0), 0);
 }
 
 #[tokio::test]
@@ -96,10 +97,11 @@ async fn queue_with_no_eligible_pod_gets_no_positive_slots() {
 
     rebalance_once(&s).await.unwrap();
 
-    // pod-a is live but not eligible for gh, so the zero-out pass pins it
-    // at 0 — gh has no worker actually serving it (the API surfaces this
-    // queue in `unassigned_queues`, computed from declarations not slots).
-    assert_eq!(s.procs.get_slots("gh", "pod-a").await.unwrap(), Some(0));
+    // pod-a is live but not eligible for gh, so it serves 0 gh workers —
+    // gh has no worker actually serving it (the API surfaces this queue in
+    // `unassigned_queues`). With no prior gh assignment it's simply left
+    // unassigned, no wasted zero-write.
+    assert_eq!(s.procs.get_slots("gh", "pod-a").await.unwrap().unwrap_or(0), 0);
     let serving: i32 = s
         .procs
         .list_slot_assignments()
@@ -125,6 +127,24 @@ async fn dropping_a_queue_zeroes_the_stale_assignment() {
     s.config.ensure_queue("default", 1).await.unwrap();
     rebalance_once(&s).await.unwrap();
     assert_eq!(s.procs.get_slots("gh", "pod-a").await.unwrap(), Some(0));
+}
+
+#[tokio::test]
+async fn zero_out_skips_pods_with_no_prior_assignment() {
+    // A live pod not eligible for a queue, with no prior assignment, is
+    // left unassigned (None) rather than written to an explicit 0 — the
+    // zero-out pass no longer issues O(pods×queues) no-op writes.
+    let s = fresh().await;
+    s.config.ensure_queue("gh", 3).await.unwrap();
+    heartbeat(&s, "owns-gh", &["gh"]).await;
+    heartbeat(&s, "owns-default", &["default"]).await;
+
+    rebalance_once(&s).await.unwrap();
+
+    // owns-default never had a gh assignment and isn't eligible → no row.
+    assert_eq!(s.procs.get_slots("gh", "owns-default").await.unwrap(), None);
+    // It does serve gh correctly via the eligible pod.
+    assert_eq!(s.procs.get_slots("gh", "owns-gh").await.unwrap(), Some(3));
 }
 
 #[tokio::test]
