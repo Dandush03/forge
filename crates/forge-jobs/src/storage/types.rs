@@ -386,11 +386,29 @@ pub struct PodRecord {
     #[serde(default)]
     pub worker_name: Option<String>,
     /// Queues this worker is responsible for. New workers always declare
-    /// at least one; an empty set only appears for a stale pre-upgrade
-    /// row and is treated as "eligible for no queue".
+    /// at least one (`start()` rejects an empty set), so an empty `queues`
+    /// here can only be a NULL pre-upgrade row — a worker still running the
+    /// old binary mid-rollout. Such a pod is treated as eligible for
+    /// *every* queue ([`PodRecord::handles`]) so the fleet keeps draining
+    /// during a rolling upgrade until it re-heartbeats with the new code.
     #[serde(default)]
     pub queues: Vec<String>,
     pub heartbeat_at: DateTime<Utc>,
+}
+
+impl PodRecord {
+    /// Is this pod eligible to run `queue`?
+    ///
+    /// True when it declared `queue`, or when its declared set is empty —
+    /// the legacy/pre-upgrade case, treated as eligible-for-all so a
+    /// mid-rollout pod keeps draining every queue until its first
+    /// new-code heartbeat narrows it (a new worker can't reach this state:
+    /// `start()` rejects an empty declaration). This is the single
+    /// eligibility predicate shared by the rebalancer and the worker view.
+    #[must_use]
+    pub fn handles(&self, queue: &str) -> bool {
+        self.queues.is_empty() || self.queues.iter().any(|q| q == queue)
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────

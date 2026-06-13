@@ -173,6 +173,35 @@ by default). After any bulk insert, run `ANALYZE sync_queue` (or wait out a
 naptime) before expecting normal claim latency. `loadgen` does this
 automatically after seeding.
 
+## Per-worker queue affinity (which worker runs which queue)
+
+Each worker declares the queues it consumes — `FORGE_QUEUES=gh,slack` or
+`.with_queues([...])` — and runs **only** those. A worker that declares
+none fails fast at `start()`; running every queue implicitly is no longer
+supported. The coordinator's rebalancer then splits each queue's
+`max_workers` across only the live workers that declared it.
+
+The operational contract that follows: **every configured queue must
+appear in some live worker's declared set, or its jobs never run.** A
+queue no worker declares isn't an error — jobs enqueue fine and sit
+`pending` indefinitely. Two ways to catch this:
+
+- The **Workers** tab flags any such queue in its "unassigned queues"
+  banner.
+- The coordinator logs `rebalance: no live worker declares this queue …`
+  at `warn` once per rebalance tick (every 5s) for each configured queue
+  with no eligible worker — wire this into your alerting.
+
+A common footgun is a typo (`FORGE_QUEUES=guthub`) or adding a queue to
+config without adding it to any worker's set. Check the banner / the warn
+log after any change to a worker's queue set.
+
+**Rolling upgrades are safe.** A worker still on the pre-affinity binary
+heartbeats with a NULL `queues` column; the rebalancer treats an empty
+declared set as *eligible for every queue* (legacy fallback), so the old
+fleet keeps draining everything until each pod re-heartbeats with the new
+code and narrows itself. No queue stalls during the rollout.
+
 ## Clock domains (debugging "a pod flapped out of the live set")
 
 The coordinator lease compares and writes timestamps with the **database

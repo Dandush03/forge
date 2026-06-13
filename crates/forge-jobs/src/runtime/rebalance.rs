@@ -112,16 +112,26 @@ pub async fn rebalance_once(storage: &Storage) -> crate::storage::error::Result<
     }
     let queues = storage.config.list_queues().await?;
     for q in queues {
-        // Only pods that *declared* this queue are eligible to run it.
-        // A pod with an empty queue set (a stale pre-upgrade row) is
-        // eligible for nothing. Pods sort by host_id from list_live_pods,
-        // so fair_shares' remainder distribution stays deterministic.
+        // Only pods eligible for this queue run it (declared it, or a
+        // legacy empty-set pod mid-rollout — see PodRecord::handles). Pods
+        // sort by host_id from list_live_pods, so fair_shares' remainder
+        // distribution stays deterministic.
         let eligible: Vec<&str> = pods
             .iter()
-            .filter(|p| p.queues.iter().any(|name| name == &q.name))
+            .filter(|p| p.handles(&q.name))
             .map(|p| p.host_id.as_str())
             .collect();
         let total = usize::try_from(q.max_workers).unwrap_or(0);
+        // A configured queue with workers but no live pod to run them is a
+        // silent stall (jobs sit pending forever) — make it loud so it
+        // reaches logs/alerts, not just the Workers-tab banner.
+        if eligible.is_empty() && total > 0 {
+            tracing::warn!(
+                queue = %q.name,
+                "rebalance: no live worker declares this queue; its jobs will not run \
+                 until a worker lists it in FORGE_QUEUES / with_queues",
+            );
+        }
         let shares = fair_shares(total, eligible.len());
         for (host, slots) in eligible.iter().zip(shares) {
             let slots = i32::try_from(slots).unwrap_or(0);

@@ -186,13 +186,16 @@ pub fn workers_overview_dto(
         })
         .collect::<Vec<_>>();
 
-    // A queue is unassigned when no live worker declared it.
+    // A queue is unassigned when no live worker is eligible for it. A
+    // worker with an empty declared set is a legacy pre-upgrade pod,
+    // eligible for every queue (mirrors PodRecord::handles), so it covers
+    // everything and the banner stays quiet during a rolling upgrade.
     let unassigned_queues = queue_names
         .iter()
         .filter(|name| {
             !workers
                 .iter()
-                .any(|w| w.queues.iter().any(|q| q == *name))
+                .any(|w| w.queues.is_empty() || w.queues.iter().any(|q| q == *name))
         })
         .cloned()
         .collect();

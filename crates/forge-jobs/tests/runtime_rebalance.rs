@@ -128,6 +128,25 @@ async fn dropping_a_queue_zeroes_the_stale_assignment() {
 }
 
 #[tokio::test]
+async fn legacy_empty_queue_pod_is_eligible_for_every_queue() {
+    // A pre-upgrade pod heartbeats with no declared queues (NULL `queues`
+    // column → empty set). It must keep draining every configured queue so
+    // a rolling upgrade doesn't stall the fleet — see PodRecord::handles.
+    let s = fresh().await;
+    s.config.ensure_queue("gh", 4).await.unwrap();
+    s.config.ensure_queue("default", 2).await.unwrap();
+    // Empty declared set — the legacy/pre-upgrade shape.
+    s.procs.pod_heartbeat("legacy", None, &[]).await.unwrap();
+
+    rebalance_once(&s).await.unwrap();
+
+    // The lone legacy pod gets each queue's full total, exactly as the
+    // pre-affinity binary (which ran every queue) would have.
+    assert_eq!(s.procs.get_slots("gh", "legacy").await.unwrap(), Some(4));
+    assert_eq!(s.procs.get_slots("default", "legacy").await.unwrap(), Some(2));
+}
+
+#[tokio::test]
 async fn redistributes_when_a_pod_goes_stale() {
     let s = fresh().await;
     s.config.ensure_queue("gh", 9).await.unwrap();

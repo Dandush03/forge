@@ -579,9 +579,7 @@ async fn fair_fallback(storage: &Storage, queue_name: &str, max_workers: i32) ->
     }
     let stale_before = Utc::now() - STALE_THRESHOLD;
     let eligible = storage.procs.list_live_pods(stale_before).await.map_or(1, |pods| {
-        pods.iter()
-            .filter(|p| p.queues.iter().any(|q| q == queue_name))
-            .count()
+        pods.iter().filter(|p| p.handles(queue_name)).count()
     });
     total.div_ceil(eligible.max(1))
 }
