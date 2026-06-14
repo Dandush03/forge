@@ -195,7 +195,7 @@ nothing in the runtime moves.
 
 ## Status
 
-`0.2` — internal API mostly stable, a few naming + restructure passes still
+`0.3` — internal API mostly stable, a few naming + restructure passes still
 likely before `1.0`. Pin a specific version if you want byte-for-byte
 reproducibility during this window.
 
