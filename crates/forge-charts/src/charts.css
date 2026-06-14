@@ -40,6 +40,18 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  /* X-axis strip geometry — ONE source of truth. The tick-label row
+   * (`--charts-x-axis-label`) plus the gap above it
+   * (`--charts-x-axis-gap`) make up the strip footprint
+   * (`--charts-x-axis-height`). The Y-tick scale spacer and the
+   * crosshair/dots overlays all offset by that footprint so the plot's
+   * 0%..100% lines up with the SVG baseline. Previously these were four
+   * separate `26px`/`22px`/`4px` literals with "keep in sync" comments;
+   * deriving them here means a consumer can retune the axis in one place
+   * and nothing can drift. */
+  --charts-x-axis-gap: 4px;
+  --charts-x-axis-label: 22px;
+  --charts-x-axis-height: calc(var(--charts-x-axis-label) + var(--charts-x-axis-gap));
   /* Set by the AreaChart component via inline style:
    *   --charts-height: 320px;
    * Falls back to 320px if not provided.
@@ -165,9 +177,9 @@
   width: 100%;
 }
 /* The scale holds the tick labels and is sized to the SVG (flex:1).
- * The ::after spacer is the x-axis strip (22px height + 4px margin in
- * `.charts-x-axis` — keep in sync) so the scale's 0%..100% lines up
- * with the plot's top edge and baseline. */
+ * The ::after spacer matches the x-axis strip footprint
+ * (`--charts-x-axis-height`) so the scale's 0%..100% lines up with the
+ * plot's top edge and baseline. */
 .charts-y-axis-scale {
   position: relative;
   flex: 1 1 0;
@@ -176,7 +188,7 @@
 .charts-y-axis::after {
   content: "";
   display: block;
-  flex: 0 0 26px;
+  flex: 0 0 var(--charts-x-axis-height);
 }
 .charts-y-tick {
   position: absolute;
@@ -214,8 +226,8 @@
 }
 .charts-x-axis {
   position: relative;
-  height: 22px;
-  margin-top: 4px;
+  height: var(--charts-x-axis-label);
+  margin-top: var(--charts-x-axis-gap);
 }
 .charts-x-tick {
   position: absolute;
@@ -318,8 +330,8 @@
   left: 0;
   right: 0;
   top: 0;
-  /* X-axis is `height: 22px; margin-top: 4px` — keep in sync. */
-  bottom: 26px;
+  /* Offset above the x-axis strip so percent positions map to the plot. */
+  bottom: var(--charts-x-axis-height);
   pointer-events: none;
 }
 .charts-crosshair {
@@ -349,9 +361,8 @@
   left: 0;
   right: 0;
   top: 0;
-  /* X-axis is `height: 22px; margin-top: 4px` — keep in sync if those
-   * change. */
-  bottom: 26px;
+  /* Offset above the x-axis strip so percent positions map to the plot. */
+  bottom: var(--charts-x-axis-height);
   pointer-events: none;
 }
 .charts-dot {
