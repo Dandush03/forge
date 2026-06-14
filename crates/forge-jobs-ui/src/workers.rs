@@ -155,7 +155,13 @@ fn WorkerCard(worker: Worker) -> impl IntoView {
     let in_flight = worker.in_flight;
     let queues = worker.queues.clone();
     // Slots keyed by queue so each chip can show "queue ×N" when assigned.
-    let slot_for = move |q: &str| worker.slots.iter().find(|s| s.queue_name == q).map(|s| s.slots);
+    let slot_for = move |q: &str| {
+        worker
+            .slots
+            .iter()
+            .find(|s| s.queue_name == q)
+            .map(|s| s.slots)
+    };
 
     view! {
         <article class="worker-card">

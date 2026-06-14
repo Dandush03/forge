@@ -675,8 +675,8 @@ mod tests {
         let stale_before = now - chrono::Duration::seconds(60);
         let pods = vec![pod("h1", &["gh"], now)];
         let procs = vec![
-            proc("h1", "gh", now, true),                                   // fresh + running
-            proc("h1", "gh", now - chrono::Duration::seconds(120), true),  // stale (crashed)
+            proc("h1", "gh", now, true), // fresh + running
+            proc("h1", "gh", now - chrono::Duration::seconds(120), true), // stale (crashed)
         ];
         let slots = vec![slot("h1", "gh", 2)];
         let queue_names = vec!["gh".to_owned()];
@@ -685,7 +685,10 @@ mod tests {
 
         assert_eq!(dto.workers.len(), 1);
         assert_eq!(dto.workers[0].workers_live, 1, "only the fresh slot counts");
-        assert_eq!(dto.workers[0].in_flight, 1, "stale slot's job not counted in-flight");
+        assert_eq!(
+            dto.workers[0].in_flight, 1,
+            "stale slot's job not counted in-flight"
+        );
     }
 
     // L10: a queue is unassigned when no live worker holds a positive slot
@@ -704,7 +707,13 @@ mod tests {
 
         // gh is served; idle is declared-but-zero-slots; paused is undeclared.
         assert!(!dto.unassigned_queues.contains(&"gh".to_owned()));
-        assert!(dto.unassigned_queues.contains(&"idle".to_owned()), "declared but 0 slots → unassigned");
-        assert!(dto.unassigned_queues.contains(&"paused".to_owned()), "undeclared → unassigned");
+        assert!(
+            dto.unassigned_queues.contains(&"idle".to_owned()),
+            "declared but 0 slots → unassigned"
+        );
+        assert!(
+            dto.unassigned_queues.contains(&"paused".to_owned()),
+            "undeclared → unassigned"
+        );
     }
 }

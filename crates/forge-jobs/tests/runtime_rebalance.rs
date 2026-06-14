@@ -64,8 +64,15 @@ async fn splits_total_across_eligible_pods() {
 
     // list_slot_assignments surfaces every written row.
     let slots = s.procs.list_slot_assignments().await.unwrap();
-    let total: i32 = slots.iter().filter(|s| s.queue_name == "gh").map(|s| s.slots).sum();
-    assert_eq!(total, 10, "all 10 slots accounted for across the assignments");
+    let total: i32 = slots
+        .iter()
+        .filter(|s| s.queue_name == "gh")
+        .map(|s| s.slots)
+        .sum();
+    assert_eq!(
+        total, 10,
+        "all 10 slots accounted for across the assignments"
+    );
 }
 
 #[tokio::test]
@@ -82,10 +89,23 @@ async fn only_pods_that_declared_the_queue_get_slots() {
     // All of gh goes to tom; jerry isn't eligible → serves 0 (left
     // unassigned rather than written to an explicit 0).
     assert_eq!(s.procs.get_slots("gh", "tom").await.unwrap(), Some(4));
-    assert_eq!(s.procs.get_slots("gh", "jerry").await.unwrap().unwrap_or(0), 0);
+    assert_eq!(
+        s.procs.get_slots("gh", "jerry").await.unwrap().unwrap_or(0),
+        0
+    );
     // All of default goes to jerry; tom isn't eligible → serves 0.
-    assert_eq!(s.procs.get_slots("default", "jerry").await.unwrap(), Some(2));
-    assert_eq!(s.procs.get_slots("default", "tom").await.unwrap().unwrap_or(0), 0);
+    assert_eq!(
+        s.procs.get_slots("default", "jerry").await.unwrap(),
+        Some(2)
+    );
+    assert_eq!(
+        s.procs
+            .get_slots("default", "tom")
+            .await
+            .unwrap()
+            .unwrap_or(0),
+        0
+    );
 }
 
 #[tokio::test]
@@ -101,7 +121,10 @@ async fn queue_with_no_eligible_pod_gets_no_positive_slots() {
     // gh has no worker actually serving it (the API surfaces this queue in
     // `unassigned_queues`). With no prior gh assignment it's simply left
     // unassigned, no wasted zero-write.
-    assert_eq!(s.procs.get_slots("gh", "pod-a").await.unwrap().unwrap_or(0), 0);
+    assert_eq!(
+        s.procs.get_slots("gh", "pod-a").await.unwrap().unwrap_or(0),
+        0
+    );
     let serving: i32 = s
         .procs
         .list_slot_assignments()
@@ -163,7 +186,10 @@ async fn legacy_empty_queue_pod_is_eligible_for_every_queue() {
     // The lone legacy pod gets each queue's full total, exactly as the
     // pre-affinity binary (which ran every queue) would have.
     assert_eq!(s.procs.get_slots("gh", "legacy").await.unwrap(), Some(4));
-    assert_eq!(s.procs.get_slots("default", "legacy").await.unwrap(), Some(2));
+    assert_eq!(
+        s.procs.get_slots("default", "legacy").await.unwrap(),
+        Some(2)
+    );
 }
 
 #[tokio::test]
@@ -181,7 +207,10 @@ async fn redistributes_when_a_pod_goes_stale() {
     s.procs.delete_for_host("pod-c").await.unwrap();
     rebalance_once(&s).await.unwrap();
 
-    assert_eq!(live_hosts(&s).await, vec!["pod-a".to_owned(), "pod-b".to_owned()]);
+    assert_eq!(
+        live_hosts(&s).await,
+        vec!["pod-a".to_owned(), "pod-b".to_owned()]
+    );
     // 9 over 2 → 5 / 4.
     assert_eq!(s.procs.get_slots("gh", "pod-a").await.unwrap(), Some(5));
     assert_eq!(s.procs.get_slots("gh", "pod-b").await.unwrap(), Some(4));
@@ -201,7 +230,10 @@ async fn reap_stale_evicts_dead_pods_and_orphan_assignments() {
         .await
         .unwrap();
 
-    assert!(live_hosts(&s).await.is_empty(), "dead pod evicted from the pod table");
+    assert!(
+        live_hosts(&s).await.is_empty(),
+        "dead pod evicted from the pod table"
+    );
     assert_eq!(
         s.procs.get_slots("gh", "pod-a").await.unwrap(),
         None,

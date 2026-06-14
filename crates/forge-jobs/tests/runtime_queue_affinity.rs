@@ -51,7 +51,10 @@ async fn start_with_comma_in_queue_name_errors() {
     let storage = JobStorage::from_one(sqlite);
     let rt = runtime(&storage, &["orders,eu"]);
 
-    let err = rt.start().await.expect_err("must reject a comma in a queue name");
+    let err = rt
+        .start()
+        .await
+        .expect_err("must reject a comma in a queue name");
     assert!(
         matches!(err, StorageError::InvalidInput(_)),
         "expected InvalidInput, got {err:?}"

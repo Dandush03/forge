@@ -126,7 +126,10 @@ pub async fn rebalance_once(storage: &Storage) -> crate::storage::error::Result<
             .map(|s| (s.queue_name.as_str(), s.host_id.as_str()))
             .collect(),
         Err(ref e) => {
-            tracing::warn!(?e, "rebalance: slot-assignment read failed; skipping zero-out this tick");
+            tracing::warn!(
+                ?e,
+                "rebalance: slot-assignment read failed; skipping zero-out this tick"
+            );
             std::collections::HashSet::new()
         }
     };

@@ -282,7 +282,10 @@ impl QueueRuntime {
                 .iter()
                 .find_map(|(q, n)| (*q == name).then_some(*n))
                 .unwrap_or(1);
-            self.storage.config.ensure_queue(name, default_workers).await?;
+            self.storage
+                .config
+                .ensure_queue(name, default_workers)
+                .await?;
             join_set.spawn(supervisor_loop(
                 self.storage.clone(),
                 self.handlers.clone(),
@@ -583,9 +586,13 @@ async fn fair_fallback(storage: &Storage, queue_name: &str, max_workers: i32) ->
         return 0;
     }
     let stale_before = Utc::now() - STALE_THRESHOLD;
-    let eligible = storage.procs.list_live_pods(stale_before).await.map_or(1, |pods| {
-        pods.iter().filter(|p| p.handles(queue_name)).count()
-    });
+    let eligible = storage
+        .procs
+        .list_live_pods(stale_before)
+        .await
+        .map_or(1, |pods| {
+            pods.iter().filter(|p| p.handles(queue_name)).count()
+        });
     total.div_ceil(eligible.max(1))
 }
 
