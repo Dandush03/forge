@@ -14,6 +14,12 @@ appended **H3** and **L7–L12**. Pure DRY/efficiency observations from that
 pass (duplicated `encode/decode_queues`, duplicated heartbeat-dot
 thresholds, duplicated tab-poll boilerplate, the quadratic DTO scans) are
 **out of scope here** — they belong to `refactor-pass`.
+**Refreshed:** 2026-06-13 — deep correctness pass over the affinity branch
+*after* H3/L7–L12 + the refactor-pass landed (commits `c0b8f19`..`2b1966b`).
+**Verdict: passes** — no new HIGH/MEDIUM. Traced the concurrency / failover /
+clock / SQLite⇄Postgres-parity surfaces the feature touches and cleared
+them; see the new "Affinity — concurrency, failover & parity (deep pass)"
+entry under Confirmed sound.
 **Scope:** correctness, races, failover, cross-replica parity,
 SQLite⇄Postgres parity, scaling, leak/exposure.
 **Out of scope:** style/lint — `clippy -D warnings` and `fmt` are assumed
@@ -473,6 +479,41 @@ default single-process SQLite build say so explicitly; ones marked
   no payloads or DSNs. `StorageError::Config` falls through the API error
   map to a generic 500, but `start()` is never called inside a request
   handler, so it's latent, not reachable.
+- **Affinity — concurrency, failover & parity (deep pass)** — traced the
+  surfaces affinity touches, all sound:
+  - *Single writer.* `rebalance_once` runs only under the cron lease
+    (`rebalance_loop` → `try_cron_lease`), so exactly one coordinator
+    writes `pod_slot_assignment` per tick. It reads `list_live_pods` + the
+    `list_slot_assignments` snapshot *before* the per-queue loop, so the
+    eligibility set and the L9 zero-out diff are one consistent snapshot;
+    a pod that re-heartbeats mid-pass is picked up next tick (5 s, single
+    coordinator → eventually consistent, no torn write).
+  - *Scale-down job interruption is unchanged by affinity.* A worker's
+    per-job token is a child of its slot token (`runtime.rs::worker_loop`),
+    so `scale_down` cancels an in-flight job on a removed slot (it retries
+    via backoff — the documented at-least-once contract). This is
+    pre-existing: a pod's eligible queues are fixed at construction, so
+    affinity introduces **no** new shrink event beyond the fleet-rebalance
+    resplits that already drove `scale_down`. Per-boot ULID `host_id` means
+    a redeployed pod is a new row, not an in-place queue-set change.
+  - *Heartbeat/reap race profile unchanged.* `pod_heartbeat` upserts
+    `worker_name`/`queues` atomically alongside `heartbeat_at` (one
+    statement); `reap_stale` still deletes the pod + its assignments. The
+    new columns add no new window.
+  - *SQLite⇄Postgres parity (verified method-by-method).* `pod_heartbeat`
+    (same upsert + SET list), `list_live_pods` (same columns, both
+    `ORDER BY host_id ASC` — the rebalancer's determinism dependency),
+    `list_slot_assignments` (same columns + order). `encode/decode_queues`
+    are now the **shared** `storage::types` helpers (L11), so the CSV
+    contract can't drift between adapters. Migrations add identical
+    nullable `worker_name`/`queues` columns. The lone divergence —
+    `list_slot_assignments` reads `slots` as `i32` (PG) vs `i64`→clamp
+    (SQLite) — cannot fire for realistic worker counts and matches the
+    existing `get_slots` read; not worth a finding.
+  - *Leak/exposure.* `/queue/workers` is read-only on the same
+    documented-unauthenticated router; `queues` reaches SQL only via
+    `.bind`, no new `format!`/`NOTIFY`-identifier surface; the DTO exposes
+    operator-set labels (`worker_name`, queue names), no payloads/DSNs.
 
 - **Claim atomicity** — both adapters claim via a single-statement
   `UPDATE … WHERE id = (SELECT … LIMIT 1 [FOR UPDATE SKIP LOCKED])
