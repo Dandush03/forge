@@ -6,6 +6,8 @@
 //! the HTTP routes serialize them, so the Leptos panel sees identical
 //! JSON whichever transport it talks to.
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 use forge_jobs::{
     JobRecord, PodRecord, ProcessRecord, QueueConfigRow, QueueCounts, SlotAssignment,
@@ -208,13 +210,14 @@ pub fn workers_overview_dto(
     // equally won't run. A legacy pre-upgrade pod (empty declared set) is
     // eligible for everything and so the rebalancer gives it positive
     // slots, which keeps those queues out of this list during a rollout.
+    // (`WorkerDto::slots` already holds only the positive assignments.)
+    let served: HashSet<&str> = workers
+        .iter()
+        .flat_map(|w| w.slots.iter().map(|s| s.queue_name.as_str()))
+        .collect();
     let unassigned_queues = queue_names
         .iter()
-        .filter(|name| {
-            !workers
-                .iter()
-                .any(|w| w.slots.iter().any(|s| &s.queue_name == *name))
-        })
+        .filter(|name| !served.contains(name.as_str()))
         .cloned()
         .collect();
 
