@@ -1,6 +1,6 @@
 [package]
 name = "forge-jobs-api"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Daniel Laloush <dandush03@users.noreply.github.com>"]
 edition = "2024"
 rust-version = "1.92"
@@ -51,7 +51,7 @@ tower       = "0.5"
 tower-http  = { version = "0.6", features = ["trace"] }
 tracing-subscriber = { workspace = true }
 
-forge-jobs = { path = "../forge-jobs", version = "0.2" }
+forge-jobs = { path = "../forge-jobs", version = "0.3" }
 
 [features]
 default = []

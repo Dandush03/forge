@@ -420,7 +420,7 @@ impl PodRecord {
 /// upstream by [`validate_queue_name`] at the declaration boundary, so a
 /// comma can't reach the round-trip and split into phantom queues.
 #[must_use]
-pub(crate) fn encode_queues(queues: &[String]) -> Option<String> {
+pub fn encode_queues(queues: &[String]) -> Option<String> {
     if queues.is_empty() {
         None
     } else {
@@ -430,7 +430,7 @@ pub(crate) fn encode_queues(queues: &[String]) -> Option<String> {
 
 /// Decode the `pod.queues` CSV column. NULL/empty → empty vec.
 #[must_use]
-pub(crate) fn decode_queues(csv: Option<String>) -> Vec<String> {
+pub fn decode_queues(csv: Option<String>) -> Vec<String> {
     match csv {
         Some(s) if !s.is_empty() => s.split(',').map(str::to_owned).collect(),
         _ => Vec::new(),
@@ -443,7 +443,7 @@ pub(crate) fn decode_queues(csv: Option<String>) -> Vec<String> {
 ///
 /// # Errors
 /// [`StorageError::InvalidInput`] if `name` is empty or contains `,`.
-pub(crate) fn validate_queue_name(name: &str) -> super::error::Result<()> {
+pub fn validate_queue_name(name: &str) -> super::error::Result<()> {
     if name.is_empty() {
         return Err(super::error::StorageError::InvalidInput(
             "queue name must not be empty".to_owned(),
