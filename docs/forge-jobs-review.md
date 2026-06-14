@@ -590,10 +590,10 @@ default single-process SQLite build say so explicitly; ones marked
 | L4 | fixed | `JobQueue::delete` returns `DeleteOutcome` {Deleted, CancelRequested, NotFound}; API keeps its `u64` touched-count contract |
 | L5 | fixed | Documented the lease (DB clock) vs pod-liveness (app clock) split + the 60s `STALE_THRESHOLD` drift assumption in `docs/operating-at-scale.md` ("Clock domains"); SQL-domain unification noted there as the future option |
 | L6 | fixed | `process_row` matches the enqueue outcome: `EnqueueOutcome::Deduped` → new `CronTickReport::skipped` counter + `debug!` "fire skipped — prior run still in flight"; `Enqueued` → `fired` + the "fired schedule" info log (moved below the enqueue). `cron: tick` summary surfaces `skipped`. Test `dedupe_keyed_schedule_skips_while_a_run_is_in_flight` asserts the fired/skipped split |
-| H3 | **pending** | rebalancer `warn!` on a configured queue with no eligible pod + document the "every configured queue must be in some worker's `FORGE_QUEUES`" contract in `operating-at-scale.md`; decide NULL-vs-empty `queues` upgrade-window handling at `decode_queues` |
-| L7 | **pending** | filter `queue_process` rows by `heartbeat_at` freshness (< `WORKER_LIVENESS_SECS`) in `workers_overview_dto` before counting live/in-flight |
-| L8 | **pending** | clock-domain note (cf. L5), or derive `now` from the DB clock for `heartbeat_age_seconds` on PG |
-| L9 | **pending** | zero-out only pods holding a positive stale assignment (diff vs `list_slot_assignments`) instead of O(pods×queues) writes every tick |
-| L10 | **pending** | flag declared-but-zero-slot queues in `unassigned_queues` by summing live `SlotAssignment.slots` |
-| L11 | **pending** | reject commas in queue names at `with_queues`/`ensure_queue`; hoist the shared CSV helper into `storage::types` |
-| L12 | **pending** | re-track `PollIntervalMs` in `WorkersTab` via an `Effect` (mirror the Overview poller) |
+| H3 | fixed | `32885fd` — `rebalance_once` `warn!`s per configured queue with no eligible pod; `PodRecord::handles` treats an empty (legacy) set as eligible-for-all so a rolling upgrade doesn't stall; contract documented in `operating-at-scale.md`; test `legacy_empty_queue_pod_is_eligible_for_every_queue` |
+| L7 | fixed | `2373383` — `workers_overview_dto` filters `queue_process` rows by `heartbeat_at >= stale_before` before counting live/in-flight; dto test `stale_worker_rows_are_excluded_from_counts` |
+| L8 | fixed | `dd8bf84` — documented the workers-view heartbeat-age clock-domain skew under "Clock domains" in `operating-at-scale.md` + a comment at the computation site (cf. L5) |
+| L9 | fixed | `c8ae36e` — `rebalance_once` snapshots `list_slot_assignments` once and zeroes only pods holding a positive stale assignment (no more O(pods×queues) no-op writes); test `zero_out_skips_pods_with_no_prior_assignment` |
+| L10 | fixed | `57854da` — `unassigned_queues` now flags any configured queue with no live worker holding a positive slot (covers paused / declared-but-zero-slot); dto test `unassigned_covers_declared_but_unserved_queues` |
+| L11 | fixed | `7a1fb9b` — `validate_queue_name` rejects commas at the `start()` declaration gate; `encode/decode_queues` hoisted into `storage::types` (single source); test `start_with_comma_in_queue_name_errors` |
+| L12 | fixed | `d410342` — `WorkersTab` installs the poll timer at mount and re-tracks `PollIntervalMs` via an `Effect`, mirroring the Overview poller |
